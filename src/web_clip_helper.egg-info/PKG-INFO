@@ -14,11 +14,68 @@ Classifier: Programming Language :: Python :: 3.12
 Classifier: Topic :: Utilities
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
+License-File: LICENSE
 Requires-Dist: typer>=0.9.0
 Requires-Dist: httpx>=0.25.0
 Requires-Dist: readability-lxml>=0.8.1
 Requires-Dist: markdownify>=0.11.0
 Requires-Dist: pyyaml>=6.0
+Requires-Dist: openai>=1.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0; extra == "dev"
 Requires-Dist: pytest-cov>=4.0; extra == "dev"
+Dynamic: license-file
+
+# web-clip-helper
+
+LLM Agent-oriented web clipping CLI tool.
+
+## Installation
+
+```bash
+pip install web-clip-helper
+```
+
+## Usage
+
+```bash
+# Clip a web page to local markdown
+web-clip-helper clip <url>
+
+# List all clipped articles
+web-clip-helper list
+
+# Get a specific clip by ID
+web-clip-helper get <clip-id>
+
+# Search clips by keyword
+web-clip-helper search <query>
+
+# List all tags
+web-clip-helper tags
+
+# Refresh clips (re-fetch and update)
+web-clip-helper refresh
+
+# Collect feedback for an article
+web-clip-helper feedback <clip-id>
+```
+
+## Configuration
+
+Set your OpenAI API key via environment variable:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+## License
+
+MIT
