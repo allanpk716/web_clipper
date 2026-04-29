@@ -175,6 +175,74 @@ def list_tags() -> None:
         idx.close()
 
 
+@app.command(name="feedback")
+def feedback(
+    description: str = typer.Argument(..., help="Problem description"),
+    feedback_type: str = typer.Option("bug", "--type", help="Feedback type: bug | feature | other"),
+) -> None:
+    """Generate a feedback file with environment info. Output is JSONL."""
+    import platform
+    from datetime import datetime
+    from pathlib import Path
+
+    from web_clip_helper import __version__
+    from web_clip_helper.config import get_config
+
+    if feedback_type not in ("bug", "feature", "other"):
+        jsonl_emit_error(stage="feedback", detail=f"Invalid feedback type: {feedback_type}. Must be bug, feature, or other.")
+        raise typer.Exit(1)
+
+    config = get_config()
+
+    # Try to get clip count (non-fatal)
+    clip_count_str: str = "N/A"
+    try:
+        from web_clip_helper.index import ClipIndex
+        idx = ClipIndex(config.db_path)
+        clip_count_str = str(len(idx.query_clips()))
+        idx.close()
+    except Exception:
+        pass
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    filename_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    content = (
+        f"# Feedback: {feedback_type}\n"
+        f"\n"
+        f"## \u95ee\u9898\u63cf\u8ff0\n"
+        f"{description}\n"
+        f"\n"
+        f"## \u73af\u5883\u4fe1\u606f\n"
+        f"- Python: {sys.version}\n"
+        f"- OS: {platform.platform()}\n"
+        f"- web-clip-helper \u7248\u672c: {__version__}\n"
+        f"- \u914d\u7f6e\u8def\u5f84: {config.storage_path}\n"
+        f"- \u6570\u636e\u5e93: {config.db_path}\n"
+        f"- \u526a\u85cf\u6570\u91cf: {clip_count_str}\n"
+        f"\n"
+        f"## \u751f\u6210\u65f6\u95f4\n"
+        f"{timestamp}\n"
+    )
+
+    feedback_dir = Path.home() / ".web-clip-helper" / "feedback"
+    feedback_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"feedback_{feedback_type}_{filename_ts}.md"
+    file_path = feedback_dir / filename
+
+    try:
+        file_path.write_text(content, encoding="utf-8")
+        jsonl_emit_result(
+            stage="feedback",
+            file=str(file_path),
+            feedback_type=feedback_type,
+            message=f"Feedback file generated: {file_path}",
+        )
+    except Exception as exc:
+        jsonl_emit_error(stage="feedback", detail=f"Failed to write feedback file: {exc}")
+        raise typer.Exit(1)
+
+
 @app.command(name="refresh")
 def refresh_clips() -> None:
     """Refresh dynamic clipped items that are due for re-clip. Output is JSONL."""

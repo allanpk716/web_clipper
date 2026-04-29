@@ -596,3 +596,99 @@ class TestCLIRefresh:
         results = [m for m in messages if m["type"] == "result"]
         assert len(results) == 1
         assert results[0]["message"] == "No clips due for refresh"
+
+
+# ── Feedback tests ──────────────────────────────────────────────────────
+
+
+class TestCLIFeedback:
+    """CLI integration tests for the feedback command."""
+
+    def test_generate_bug_feedback(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Generate a bug feedback file with correct structure."""
+        feedback_dir = tmp_path / "feedback"
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        output = _run_cli("feedback", "Something is broken")
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert len(results) == 1
+
+        file_path = results[0]["file"]
+        assert "feedback_bug_" in results[0]["file"]
+        assert results[0]["feedback_type"] == "bug"
+
+        # File should exist and contain key fields
+        from pathlib import Path as P
+        content = P(file_path).read_text(encoding="utf-8")
+        assert "# Feedback: bug" in content
+        assert "Something is broken" in content
+        assert "Python:" in content
+        assert "OS:" in content
+        assert "web-clip-helper" in content
+
+    def test_generate_feature_feedback(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Generate a feature request feedback file."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        output = _run_cli("feedback", "Add dark mode", "--type", "feature")
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert len(results) == 1
+        assert results[0]["feedback_type"] == "feature"
+        assert "feedback_feature_" in results[0]["file"]
+
+        from pathlib import Path as P
+        content = P(results[0]["file"]).read_text(encoding="utf-8")
+        assert "# Feedback: feature" in content
+        assert "Add dark mode" in content
+
+    def test_feedback_dir_auto_created(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Feedback directory is auto-created if it doesn't exist."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        feedback_dir = tmp_path / ".web-clip-helper" / "feedback"
+        assert not feedback_dir.exists()
+
+        output = _run_cli("feedback", "Test description")
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert len(results) == 1
+        assert feedback_dir.exists()
+
+    def test_feedback_empty_description(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty description is accepted and written to file."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        output = _run_cli("feedback", "")
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert len(results) == 1
+
+        from pathlib import Path as P
+        content = P(results[0]["file"]).read_text(encoding="utf-8")
+        assert "# Feedback: bug" in content
+
+    def test_feedback_filename_format(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Filename follows feedback_{type}_{YYYYMMDD_HHMMSS}.md pattern."""
+        import re
+        from pathlib import Path as P
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        output = _run_cli("feedback", "Check filename")
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        file_path = results[0]["file"]
+        filename = P(file_path).name
+
+        assert re.match(r"feedback_bug_\d{8}_\d{6}\.md", filename), f"Filename format wrong: {filename}"
+
+    def test_feedback_invalid_type(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Invalid feedback type returns an error."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        output = _run_cli("feedback", "Test", "--type", "invalid")
+        messages = _parse_jsonl(output)
+        errors = [m for m in messages if m["type"] == "error"]
+        assert len(errors) == 1
+        assert "Invalid feedback type" in errors[0]["detail"]
