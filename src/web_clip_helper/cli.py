@@ -12,6 +12,9 @@ import typer
 
 from web_clip_helper.output import jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress
 
+# Trigger adapter auto-discovery registration
+import web_clip_helper.adapters._registry  # noqa: F401
+
 __all__ = ["app"]
 
 app = typer.Typer(
@@ -54,20 +57,26 @@ def clip(
     url: Optional[str] = typer.Argument(None, help="URL to clip"),
     text: Optional[str] = typer.Argument(None, help="Raw text to clip"),
 ) -> None:
-    """Clip a URL or raw text into Markdown + storage.
-
-    For now this validates input and emits progress/error JSONL.
-    Full pipeline is wired in subsequent slices.
-    """
+    """Clip a URL or raw text into Markdown + storage."""
     if not url and not text:
-        jsonl_emit_error(stage="clip", detail="Either --url or --text must be provided")
+        jsonl_emit_error(stage="clip", detail="Either a URL or text must be provided")
         raise typer.Exit(1)
 
-    if url:
-        jsonl_emit_progress(message=f"Starting clip for URL: {url}", percent=0)
-        # TODO: adapter dispatch, fetch, convert, store (S02+)
-        jsonl_emit_progress(message="Clip pipeline not yet wired", percent=100)
-    elif text:
-        jsonl_emit_progress(message="Starting clip for raw text", percent=0)
-        # TODO: text processing pipeline (S02+)
-        jsonl_emit_progress(message="Clip pipeline not yet wired", percent=100)
+    from web_clip_helper.config import get_config
+    from web_clip_helper.pipeline import clip_text, clip_url
+
+    config = get_config()
+
+    try:
+        if url:
+            result = clip_url(url, config)
+        else:
+            result = clip_text(text or "", config)
+
+        if result is None:
+            raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        jsonl_emit_error(stage="clip", detail=f"Unexpected error: {exc}")
+        raise typer.Exit(1)
