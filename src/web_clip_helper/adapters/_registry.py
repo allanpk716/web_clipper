@@ -18,6 +18,7 @@ from .weibo_headline import WeiboHeadlineAdapter
 from .weibo_card import WeiboCardAdapter
 from .weibo import WeiboAdapter
 from .wechat import WeChatAdapter
+from .arxiv import ArxivAdapter
 
 __all__ = [
     "GitHubAdapter",
@@ -26,6 +27,7 @@ __all__ = [
     "WeiboCardAdapter",
     "WeiboAdapter",
     "WeChatAdapter",
+    "ArxivAdapter",
 ]
 
 # Re-export for convenience
