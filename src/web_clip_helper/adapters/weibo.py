@@ -267,6 +267,7 @@ class WeiboAdapter:
             "User-Agent": _MOBILE_UA,
             "Accept": "application/json, text/plain, */*",
             "X-Requested-With": "XMLHttpRequest",
+            "Referer": url,
         }
 
         try:

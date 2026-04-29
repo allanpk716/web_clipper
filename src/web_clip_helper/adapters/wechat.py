@@ -83,7 +83,8 @@ def _extract_text_from_html(html: str, pattern: re.Pattern[str]) -> str:
     """Extract inner text from the first match of *pattern* in *html*.
 
     Handles simple opening tags with attributes. Returns the stripped
-    text content, or an empty string if no match.
+    text content with any inner HTML tags removed, or an empty string
+    if no match.
     """
     m = pattern.search(html)
     if not m:
@@ -101,7 +102,10 @@ def _extract_text_from_html(html: str, pattern: re.Pattern[str]) -> str:
     close_idx = after_open.find(close_tag)
     if close_idx == -1:
         return ""
-    return after_open[:close_idx].strip()
+    inner = after_open[:close_idx].strip()
+    # Strip any inner HTML tags (e.g. <span class="js_title_inner">)
+    inner = re.sub(r"<[^>]+>", "", inner).strip()
+    return inner
 
 
 def _extract_title(html: str) -> str:

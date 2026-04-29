@@ -395,6 +395,18 @@ def _write_markdown_report(
 
 
 def main() -> None:
+    # Fix Windows console encoding for emoji output
+    if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(
         description="Integration test: clip 25+ real URLs from baseline data",
     )

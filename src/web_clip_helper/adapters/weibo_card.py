@@ -212,9 +212,9 @@ class WeiboCardAdapter:
             jsonl_emit_error(stage="fetch", detail=msg, url=url)
             raise AdapterError(msg) from exc
 
-        # Check API response code
+        # Check API response code (string or int — Weibo returns "100000" as string)
         api_code = data.get("code")
-        if api_code != 100000:
+        if str(api_code) != "100000":
             msg = f"Weibo Card API error: code={api_code}"
             jsonl_emit_error(stage="fetch", detail=msg, url=url)
             raise AdapterError(msg)

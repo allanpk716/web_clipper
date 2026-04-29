@@ -1,0 +1,337 @@
+{
+  "aggregate": {
+    "total": 25,
+    "passed": 25,
+    "failed": 0,
+    "errors": 0,
+    "pass_rate": 100.0,
+    "by_adapter": {
+      "git_hub": {
+        "total": 4,
+        "passed": 4,
+        "failed": 0,
+        "errors": 0
+      },
+      "weibo": {
+        "total": 19,
+        "passed": 19,
+        "failed": 0,
+        "errors": 0
+      },
+      "we_chat": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "errors": 0
+      },
+      "weibo_card": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "errors": 0
+      }
+    }
+  },
+  "results": [
+    {
+      "url": "https://github.com/safishamsi/graphify",
+      "adapter_type": "git_hub",
+      "status": "success",
+      "content_md_length": 7424,
+      "image_count": 1,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 7217.999999993481,
+      "folder": "2026-04-10_AI代码知识图谱工具",
+      "title": "graphify"
+    },
+    {
+      "url": "https://github.com/hicccc77/WeFlow",
+      "adapter_type": "git_hub",
+      "status": "success",
+      "content_md_length": 3788,
+      "image_count": 8,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 7141.000000061467,
+      "folder": "2026-04-10_WeFlow项目文件夹",
+      "title": "WeFlow"
+    },
+    {
+      "url": "https://github.com/rtk-ai/rtk",
+      "adapter_type": "git_hub",
+      "status": "success",
+      "content_md_length": 21176,
+      "image_count": 8,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 7515.999999945052,
+      "folder": "2026-04-12_RTK_Rust_Token_Killer",
+      "title": "1. Install for your AI tool"
+    },
+    {
+      "url": "https://github.com/NanmiCoder/MediaCrawler",
+      "adapter_type": "git_hub",
+      "status": "success",
+      "content_md_length": 9584,
+      "image_count": 16,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 19109.000000054948,
+      "folder": "2026-04-13_MediaCrawler_Github_20260413",
+      "title": "🔥 MediaCrawler - 自媒体平台爬虫 🕷️"
+    },
+    {
+      "url": "https://m.weibo.cn/status/5285694316479156",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1631,
+      "image_count": 4,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 2562.999999965541,
+      "folder": "2026-04-11_宝玉xp手绘风信息图提示词选项",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5286919434406768",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1414,
+      "image_count": 1,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 1765.0000000139698,
+      "folder": "2026-04-12_AI模型拒绝机制破解与解放",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5284653707562804",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 584,
+      "image_count": 3,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 2577.999999979511,
+      "folder": "2026-04-13_3B1B主控动画技能开发",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5286977017743334",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1381,
+      "image_count": 1,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 1594.0000000409782,
+      "folder": "2026-04-13_AI-Trader智能交易全平台",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5287321752306714",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1199,
+      "image_count": 1,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 1500.0,
+      "folder": "2026-04-13_AI大语言模型入门实践",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5287329237568712",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 4700,
+      "image_count": 0,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 890.999999945052,
+      "folder": "2026-04-13_AI就业影响研究：金字塔到钻石的转型",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5287320401744312",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1525,
+      "image_count": 1,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 1577.999999979511,
+      "folder": "2026-04-13_AI编码工具优化：代码库知识图谱",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5287272670825791",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 677,
+      "image_count": 6,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 3187.000000034459,
+      "folder": "2026-04-13_Claude-Code-Game-Studios体验",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5287164465908242",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 2035,
+      "image_count": 4,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 2219.000000040978,
+      "folder": "2026-04-13_Gemma4提速秘籍_23%速度提升解码法",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5287319123007513",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 2006,
+      "image_count": 1,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 1765.999999945052,
+      "folder": "2026-04-13_LLM-Wiki-v2 AI知识编译革新",
+      "title": ""
+    },
+    {
+      "url": "https://mp.weixin.qq.com/s/3so0SsVVttwHRiRL1NAwYQ",
+      "adapter_type": "we_chat",
+      "status": "success",
+      "content_md_length": 3711,
+      "image_count": 3,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 2281.000000075437,
+      "folder": "2026-04-13_MQuickJS：10kB内存跑JS引擎",
+      "title": "10kB 内存跑 JS 引擎？V8 的千分之一大小，这位传奇程序员又出手了"
+    },
+    {
+      "url": "https://m.weibo.cn/status/5286491774518092",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1744,
+      "image_count": 6,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 2233.9999999385327,
+      "folder": "2026-04-13_Simon白日梦：Karpathy llm-wiki.md应用",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5287308640391410",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1232,
+      "image_count": 1,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 1641.0000000614673,
+      "folder": "2026-04-13_Windows一键清理垃圾软件",
+      "title": ""
+    },
+    {
+      "url": "https://card.weibo.com/article/m/show/id/2309405287021303431221",
+      "adapter_type": "weibo_card",
+      "status": "success",
+      "content_md_length": 9105,
+      "image_count": 11,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 3218.999999924563,
+      "folder": "2026-04-13_多智能体协作模式选择指南",
+      "title": "多智能体协作指南：五种主流模式怎么选、怎么用？"
+    },
+    {
+      "url": "https://m.weibo.cn/status/5287279157317312",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1862,
+      "image_count": 0,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 842.9999999934807,
+      "folder": "2026-04-13_智能体身份认证授权思考",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5288415252973398",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1446,
+      "image_count": 3,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 2079.0000000270084,
+      "folder": "2026-04-16_[技术] AI一键生成专业架构图：纯文本描述，无需设计技能",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5289087067753349",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1259,
+      "image_count": 1,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 1952.999999979511,
+      "folder": "2026-04-18_[技术] 工具：微信收藏可视化分析神器wx-favorites-report",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5289548764677505",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 7868,
+      "image_count": 2,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 1891.0000000614673,
+      "folder": "2026-04-20_[技术] Claude Code架构揭秘：98.4%代码为基础设施，仅1.6%涉及AI决策",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5289686982987209",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1248,
+      "image_count": 1,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 1545.9999999729916,
+      "folder": "2026-04-20_[技术] 图表设计库：13种编辑级图表+自动品牌配色",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5278153016082872",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 1602,
+      "image_count": 2,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 1625.0,
+      "folder": "2026-04-22_[技术] Google Stitch DESIGN.md：用纯文本统一 AI 设计风格一致性",
+      "title": ""
+    },
+    {
+      "url": "https://m.weibo.cn/status/5290585120572320",
+      "adapter_type": "weibo",
+      "status": "success",
+      "content_md_length": 541,
+      "image_count": 3,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 2016.0000000614673,
+      "folder": "2026-04-22_[技术] 寓言教学法：通过故事间接传递复杂概念",
+      "title": ""
+    }
+  ]
+}
