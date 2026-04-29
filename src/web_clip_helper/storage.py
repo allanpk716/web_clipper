@@ -125,6 +125,42 @@ class StorageManager:
 
         return md_path
 
+    def save_file(
+        self,
+        entry_path: Path,
+        filename: str,
+        content: bytes,
+    ) -> Path:
+        """Write binary content to a file in the entry directory.
+
+        Parameters
+        ----------
+        entry_path:
+            Directory returned by ``create_entry()``.
+        filename:
+            Name for the file (e.g. ``paper.pdf``).
+        content:
+            Raw bytes to write.
+
+        Returns
+        -------
+        Path
+            Path to the written file.
+
+        Raises
+        ------
+        OSError
+            If the write fails (disk full, permissions, etc.).
+        """
+        file_path = entry_path / filename
+        try:
+            file_path.write_bytes(content)
+        except OSError as exc:
+            raise OSError(
+                f"Cannot write file {file_path}: {exc}"
+            ) from exc
+        return file_path
+
     def get_images_dir(self, entry_path: Path) -> Path:
         """Return the ``images/`` subdirectory path for *entry_path*."""
         images_dir = entry_path / "images"

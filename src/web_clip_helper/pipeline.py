@@ -253,6 +253,24 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
         percent=85,
     )
 
+    # 6b. Save extra files (PDF, etc.)
+    extra_file_count = 0
+    if raw.extra_files:
+        for fname, content in raw.extra_files.items():
+            try:
+                fp = storage.save_file(entry_path, fname, content)
+                extra_file_count += 1
+                jsonl_emit_progress(
+                    message=f"Saved extra file: {fp.name}",
+                    percent=87,
+                )
+            except OSError as exc:
+                jsonl_emit_error(
+                    stage="storage",
+                    detail=f"Failed to save extra file {fname}: {exc}",
+                )
+                return None
+
     # 7. Save to SQLite index
     record_id: int | None = None
     try:
@@ -292,6 +310,7 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
         folder=str(entry_path),
         markdown=str(md_path),
         image_count=image_count,
+        file_count=extra_file_count,
         record_id=record_id,
         tags=llm_tags,
         category=llm_category,
