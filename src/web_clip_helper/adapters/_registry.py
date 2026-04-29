@@ -14,8 +14,9 @@ from __future__ import annotations
 from ..adapter import adapter_router
 from .github import GitHubAdapter
 from .generic import GenericWebAdapter
+from .weibo import WeiboAdapter
 
-__all__ = ["GitHubAdapter", "GenericWebAdapter"]
+__all__ = ["GitHubAdapter", "GenericWebAdapter", "WeiboAdapter"]
 
 # Re-export for convenience
 __all__: list[str]  # type: ignore[no-redef]
