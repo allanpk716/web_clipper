@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import httpx
 
 from web_clip_helper.adapter import (
     AdapterError,
@@ -127,8 +128,20 @@ class TestRegisterAdapter:
 
 
 class TestGenericAdapter:
-    def test_raises_not_implemented(self):
-        """Generic adapter raises AdapterError when fetch is called."""
+    def test_delegates_to_real_implementation(self):
+        """Generic adapter delegates to GenericWebAdapter (not a placeholder)."""
         adapter = _GenericAdapter()
-        with pytest.raises(AdapterError, match="not yet implemented"):
-            adapter.fetch("https://anything.com")
+        # source_type should now be "web" (delegated)
+        assert adapter.source_type == "web"
+
+    def test_raises_on_genuine_fetch_failure(self):
+        """Generic adapter raises AdapterError when fetch actually fails."""
+        from unittest.mock import patch
+
+        adapter = _GenericAdapter()
+        with patch("web_clip_helper.adapters.generic.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__ = lambda s: s
+            mock_client.return_value.__exit__ = lambda s, *a: None
+            mock_client.return_value.get.side_effect = httpx.ConnectError("no network")
+            with pytest.raises(AdapterError, match="Failed to fetch"):
+                adapter.fetch("https://nonexistent.invalid/page")
