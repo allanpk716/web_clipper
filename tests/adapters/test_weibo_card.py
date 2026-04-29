@@ -148,6 +148,51 @@ class TestWeiboCardRouting:
         cls = route_url("HTTPS://CARD.WEIBO.COM/ARTICLE/M/SHOW/ID/12345")
         assert cls is WeiboCardAdapter
 
+    def test_http_url_routes_to_card_adapter(self):
+        """HTTP (non-HTTPS) card.weibo.com URL also routes correctly."""
+        from web_clip_helper.adapter import register_adapter
+
+        register_adapter(
+            r"https?://card\.weibo\.com/article/.*",
+            WeiboCardAdapter,
+        )
+        register_adapter(
+            r"https?://(m\.)?weibo\.c(n|om)/.*",
+            WeiboAdapter,
+        )
+
+        cls = route_url("http://card.weibo.com/article/m/show/id/2309405287021303431221")
+        assert cls is WeiboCardAdapter
+
+    def test_empty_string_url_raises_valueerror(self):
+        """Empty string URL raises ValueError from route_url."""
+        from web_clip_helper.adapter import register_adapter
+
+        register_adapter(
+            r"https?://card\.weibo\.com/article/.*",
+            WeiboCardAdapter,
+        )
+
+        with pytest.raises(ValueError, match="Invalid URL"):
+            route_url("")
+
+    def test_non_card_weibo_url_not_matched(self):
+        """Non-card weibo URLs (e.g. m.weibo.cn) don't match card adapter."""
+        from web_clip_helper.adapter import register_adapter
+
+        register_adapter(
+            r"https?://card\.weibo\.com/article/.*",
+            WeiboCardAdapter,
+        )
+        register_adapter(
+            r"https?://(m\.)?weibo\.c(n|om)/.*",
+            WeiboAdapter,
+        )
+
+        cls = route_url("https://m.weibo.cn/status/5127357410259489")
+        assert cls is WeiboAdapter
+        assert cls is not WeiboCardAdapter
+
 
 # ── Article ID extraction ───────────────────────────────────────────
 
@@ -211,6 +256,31 @@ class TestImageExtraction:
 
         images = _extract_images(html)
         assert len(images) == 0
+
+    def test_data_src_priority_over_src_both_nonempty(self):
+        """When both data-src and src have different non-empty values, data-src wins."""
+        html = '<img data-src="https://wx1.sinaimg.cn/large/a.jpg" src="https://placeholder.com/default.gif">'
+        from web_clip_helper.adapters.weibo_card import _extract_images
+
+        images = _extract_images(html)
+        assert len(images) == 1
+        assert images[0] == "https://wx1.sinaimg.cn/large/a.jpg"
+
+    def test_mixed_images_data_src_and_src(self):
+        """Mix of images with data-src only, src only, and both."""
+        html = """<div>
+            <img data-src="https://wx1.sinaimg.cn/large/a.jpg" src="">
+            <img src="https://example.com/b.jpg">
+            <img data-src="https://wx2.sinaimg.cn/large/c.jpg" src="https://placeholder.com/c.gif">
+        </div>"""
+        from web_clip_helper.adapters.weibo_card import _extract_images
+
+        images = _extract_images(html)
+        assert len(images) == 3
+        assert images[0] == "https://wx1.sinaimg.cn/large/a.jpg"
+        assert images[1] == "https://example.com/b.jpg"
+        # data-src wins over src for the third image
+        assert images[2] == "https://wx2.sinaimg.cn/large/c.jpg"
 
 
 # ── Full fetch integration ──────────────────────────────────────────
@@ -422,6 +492,27 @@ class TestWeiboCardFetch:
             )
 
         assert "03-15 10:30" in result.content_md
+
+    def test_empty_title_fallback_to_default(self):
+        """When API returns empty title, falls back to 'Weibo Card Article'."""
+        api_data = _sample_api_response(title="")
+        api_data["data"]["title"] = ""
+
+        adapter = WeiboCardAdapter()
+        resp = _mock_response(200, json_data=api_data)
+
+        with patch("web_clip_helper.adapters.weibo_card.httpx.Client") as mock_client_cls:
+            client_inst = MagicMock()
+            mock_client_cls.return_value.__enter__ = lambda s: client_inst
+            mock_client_cls.return_value.__exit__ = lambda s, *a: None
+            client_inst.get.return_value = resp
+
+            result = adapter.fetch(
+                "https://card.weibo.com/article/m/show/id/123"
+            )
+
+        assert result.title == "Weibo Card Article"
+        assert "Weibo Card Article" in result.content_md
 
 
 # ── Error handling ──────────────────────────────────────────────────
