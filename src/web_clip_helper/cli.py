@@ -173,3 +173,97 @@ def list_tags() -> None:
         raise typer.Exit(1)
     finally:
         idx.close()
+
+
+@app.command(name="refresh")
+def refresh_clips() -> None:
+    """Refresh dynamic clipped items that are due for re-clip. Output is JSONL."""
+    from web_clip_helper.config import get_config
+    from web_clip_helper.index import ClipIndex
+    from web_clip_helper.pipeline import clip_url
+
+    config = get_config()
+    idx = ClipIndex(config.db_path)
+    try:
+        refreshable = idx.get_refreshable_clips()
+
+        if not refreshable:
+            jsonl_emit_result(stage="refresh", refreshed=0, failed=0, message="No clips due for refresh")
+            return
+
+        jsonl_emit_progress(stage="refresh", message=f"Found {len(refreshable)} clips to refresh", count=len(refreshable))
+
+        refreshed_count = 0
+        failed_count = 0
+
+        for clip in refreshable:
+            clip_id = clip["id"]
+            url = clip.get("url", "")
+            jsonl_emit_progress(
+                stage="refresh",
+                message=f"Refreshing clip #{clip_id}: {url}",
+                clip_id=clip_id,
+            )
+
+            try:
+                result = clip_url(url, config)
+                if result is None:
+                    failed_count += 1
+                    jsonl_emit_error(
+                        stage="refresh",
+                        detail=f"Failed to refresh clip #{clip_id}: clip_url returned None",
+                        clip_id=clip_id,
+                    )
+                    continue
+
+                # Remove old folder contents (markdown + images)
+                folder_path = clip.get("folder_path", "")
+                if folder_path:
+                    from pathlib import Path
+                    folder = Path(folder_path)
+                    if folder.exists():
+                        for child in folder.iterdir():
+                            if child.is_file():
+                                child.unlink()
+                            elif child.is_dir():
+                                import shutil
+                                shutil.rmtree(child, ignore_errors=True)
+
+                # Update the clip record with new paths
+                idx.update_clip(clip_id, {
+                    "folder_path": str(result.folder_path),
+                    "markdown_path": str(result.markdown_path),
+                    "image_count": result.image_count,
+                    "title": clip.get("title", ""),  # keep original title unless we want to update
+                })
+
+                # Mark as refreshed
+                idx.mark_refreshed(clip_id)
+                refreshed_count += 1
+
+                jsonl_emit_progress(
+                    stage="refresh",
+                    message=f"Clip #{clip_id} refreshed successfully",
+                    clip_id=clip_id,
+                )
+
+            except Exception as exc:
+                failed_count += 1
+                jsonl_emit_error(
+                    stage="refresh",
+                    detail=f"Error refreshing clip #{clip_id}: {exc}",
+                    clip_id=clip_id,
+                )
+
+        jsonl_emit_result(
+            stage="refresh",
+            refreshed=refreshed_count,
+            failed=failed_count,
+            message=f"Refresh complete: {refreshed_count} refreshed, {failed_count} failed",
+        )
+
+    except Exception as exc:
+        jsonl_emit_error(stage="refresh", detail=f"Refresh command failed: {exc}")
+        raise typer.Exit(1)
+    finally:
+        idx.close()

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -317,3 +319,280 @@ class TestCLITags:
         messages = _parse_jsonl(output)
         results = [m for m in messages if m["type"] == "result"]
         assert results == []
+
+
+# ── Refresh tests ───────────────────────────────────────────────────────
+
+
+class TestRefreshIndex:
+    """Tests for ClipIndex refresh-related methods."""
+
+    def test_get_refreshable_empty_db(self, tmp_db: ClipIndex) -> None:
+        """No clips at all → empty list."""
+        assert tmp_db.get_refreshable_clips() == []
+
+    def test_no_dynamic_clips(self, tmp_db: ClipIndex) -> None:
+        """Non-dynamic clips should never be returned."""
+        tmp_db.save_clip({
+            "url": "https://example.com",
+            "title": "Static",
+            "source_type": "web",
+            "is_dynamic": 0,
+            "folder_path": "/clips/static",
+            "markdown_path": "/clips/static/s.md",
+        })
+        assert tmp_db.get_refreshable_clips() == []
+
+    def test_dynamic_never_refreshed(self, tmp_db: ClipIndex) -> None:
+        """Dynamic clip with no last_refreshed_at → is refreshable."""
+        tmp_db.save_clip({
+            "url": "https://example.com/live",
+            "title": "Live",
+            "source_type": "web",
+            "is_dynamic": 1,
+            "refresh_interval_days": 7,
+            "last_refreshed_at": "",
+            "folder_path": "/clips/live",
+            "markdown_path": "/clips/live/live.md",
+        })
+        results = tmp_db.get_refreshable_clips()
+        assert len(results) == 1
+        assert results[0]["title"] == "Live"
+
+    def test_dynamic_expired(self, tmp_db: ClipIndex) -> None:
+        """Dynamic clip refreshed long ago → is refreshable."""
+        old_time = (datetime.now() - timedelta(days=30)).isoformat()
+        tmp_db.save_clip({
+            "url": "https://example.com/old",
+            "title": "Old Live",
+            "source_type": "web",
+            "is_dynamic": 1,
+            "refresh_interval_days": 7,
+            "last_refreshed_at": old_time,
+            "folder_path": "/clips/old",
+            "markdown_path": "/clips/old/old.md",
+        })
+        results = tmp_db.get_refreshable_clips()
+        assert len(results) == 1
+
+    def test_dynamic_not_yet_expired(self, tmp_db: ClipIndex) -> None:
+        """Dynamic clip refreshed recently → NOT refreshable."""
+        tmp_db.save_clip({
+            "url": "https://example.com/recent",
+            "title": "Recent",
+            "source_type": "web",
+            "is_dynamic": 1,
+            "refresh_interval_days": 7,
+            "last_refreshed_at": datetime.now().isoformat(),
+            "folder_path": "/clips/recent",
+            "markdown_path": "/clips/recent/recent.md",
+        })
+        results = tmp_db.get_refreshable_clips()
+        assert results == []
+
+    def test_mark_refreshed(self, tmp_db: ClipIndex) -> None:
+        """mark_refreshed should set last_refreshed_at to now."""
+        cid = tmp_db.save_clip({
+            "url": "https://example.com/mr",
+            "title": "Mark Test",
+            "source_type": "web",
+            "is_dynamic": 1,
+            "folder_path": "/clips/mr",
+            "markdown_path": "/clips/mr/mr.md",
+        })
+        assert tmp_db.mark_refreshed(cid) is True
+        clip = tmp_db.get_clip(cid)
+        assert clip is not None
+        assert clip["last_refreshed_at"] is not None
+        assert clip["last_refreshed_at"] != ""
+
+    def test_mark_refreshed_nonexistent(self, tmp_db: ClipIndex) -> None:
+        """mark_refreshed on non-existent ID returns False."""
+        assert tmp_db.mark_refreshed(99999) is False
+
+    def test_is_expired_none(self) -> None:
+        """None last_refreshed_at means expired."""
+        from web_clip_helper.index import ClipIndex
+        assert ClipIndex._is_expired(None, 7) is True
+
+    def test_is_expired_empty_string(self) -> None:
+        """Empty string last_refreshed_at means expired."""
+        from web_clip_helper.index import ClipIndex
+        assert ClipIndex._is_expired("", 7) is True
+
+    def test_is_expired_recent(self) -> None:
+        """Recently refreshed → not expired."""
+        from web_clip_helper.index import ClipIndex
+        assert ClipIndex._is_expired(datetime.now().isoformat(), 7) is False
+
+    def test_is_expired_old(self) -> None:
+        """Old timestamp → expired."""
+        from web_clip_helper.index import ClipIndex
+        old = (datetime.now() - timedelta(days=30)).isoformat()
+        assert ClipIndex._is_expired(old, 7) is True
+
+
+class TestCLIRefresh:
+    """CLI integration tests for the refresh command."""
+
+    def test_refresh_no_dynamic_clips(self, cli_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No dynamic clips → report nothing to refresh."""
+        idx = ClipIndex(cli_config)
+        idx.save_clip({
+            "url": "https://example.com",
+            "title": "Static",
+            "source_type": "web",
+            "is_dynamic": 0,
+            "folder_path": "/clips/static",
+            "markdown_path": "/clips/static/s.md",
+        })
+        idx.close()
+
+        output = _run_cli("refresh")
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert len(results) == 1
+        assert results[0]["refreshed"] == 0
+        assert results[0]["message"] == "No clips due for refresh"
+
+    def test_refresh_with_expired_dynamic(
+        self, cli_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Expired dynamic clip → clip_url is called, record updated."""
+        from web_clip_helper.models import ClipResult
+
+        old_time = (datetime.now() - timedelta(days=30)).isoformat()
+
+        idx = ClipIndex(cli_config)
+        cid = idx.save_clip({
+            "url": "https://example.com/live",
+            "title": "Live Page",
+            "source_type": "web",
+            "is_dynamic": 1,
+            "refresh_interval_days": 7,
+            "last_refreshed_at": old_time,
+            "folder_path": str(tmp_path / "live"),
+            "markdown_path": str(tmp_path / "live" / "live.md"),
+        })
+        idx.close()
+
+        # Create the old folder structure so cleanup can run
+        old_folder = tmp_path / "live"
+        old_folder.mkdir(parents=True, exist_ok=True)
+        (old_folder / "live.md").write_text("old content", encoding="utf-8")
+        (old_folder / "images").mkdir(exist_ok=True)
+
+        new_folder = tmp_path / "new-live"
+        new_folder.mkdir(parents=True, exist_ok=True)
+        new_md = new_folder / "new-live.md"
+        new_md.write_text("new content", encoding="utf-8")
+
+        mock_result = ClipResult(
+            folder_path=new_folder,
+            markdown_path=new_md,
+            image_count=0,
+            record_id=cid,
+        )
+
+        with patch("web_clip_helper.pipeline.clip_url", return_value=mock_result) as mock_clip:
+            output = _run_cli("refresh")
+            mock_clip.assert_called_once()
+
+        messages = _parse_jsonl(output)
+        errors = [m for m in messages if m["type"] == "error"]
+        assert errors == [], f"Unexpected errors: {errors}"
+
+        results = [m for m in messages if m["type"] == "result" and "refreshed" in m]
+        assert len(results) == 1
+        assert results[0]["refreshed"] == 1
+        assert results[0]["failed"] == 0
+
+    def test_refresh_failure_continues(
+        self, cli_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """If clip_url returns None for one clip, continue and report failure."""
+        from web_clip_helper.models import ClipResult
+
+        old_time = (datetime.now() - timedelta(days=30)).isoformat()
+
+        idx = ClipIndex(cli_config)
+        cid1 = idx.save_clip({
+            "url": "https://example.com/fail",
+            "title": "Fail Page",
+            "source_type": "web",
+            "is_dynamic": 1,
+            "refresh_interval_days": 7,
+            "last_refreshed_at": old_time,
+            "folder_path": str(tmp_path / "fail"),
+            "markdown_path": str(tmp_path / "fail" / "fail.md"),
+        })
+        cid2 = idx.save_clip({
+            "url": "https://example.com/ok",
+            "title": "OK Page",
+            "source_type": "web",
+            "is_dynamic": 1,
+            "refresh_interval_days": 7,
+            "last_refreshed_at": old_time,
+            "folder_path": str(tmp_path / "ok"),
+            "markdown_path": str(tmp_path / "ok" / "ok.md"),
+        })
+        idx.close()
+
+        # Create folders
+        for name in ("fail", "ok"):
+            d = tmp_path / name
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{name}.md").write_text("old", encoding="utf-8")
+
+        ok_folder = tmp_path / "new-ok"
+        ok_folder.mkdir(parents=True, exist_ok=True)
+        ok_md = ok_folder / "new-ok.md"
+        ok_md.write_text("new", encoding="utf-8")
+
+        mock_ok = ClipResult(
+            folder_path=ok_folder,
+            markdown_path=ok_md,
+            image_count=0,
+            record_id=cid2,
+        )
+
+        call_count = 0
+
+        def side_effect(url, config):
+            nonlocal call_count
+            call_count += 1
+            if "fail" in url:
+                return None
+            return mock_ok
+
+        with patch("web_clip_helper.pipeline.clip_url", side_effect=side_effect):
+            output = _run_cli("refresh")
+
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result" and "refreshed" in m]
+        assert len(results) == 1
+        assert results[0]["refreshed"] == 1
+        assert results[0]["failed"] == 1
+
+    def test_refresh_non_dynamic_not_selected(self, cli_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Non-dynamic clips should not be selected for refresh."""
+
+        idx = ClipIndex(cli_config)
+        idx.save_clip({
+            "url": "https://example.com/static",
+            "title": "Static Page",
+            "source_type": "web",
+            "is_dynamic": 0,
+            "folder_path": "/clips/static",
+            "markdown_path": "/clips/static/s.md",
+        })
+        idx.close()
+
+        with patch("web_clip_helper.pipeline.clip_url") as mock_clip:
+            output = _run_cli("refresh")
+            mock_clip.assert_not_called()
+
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert len(results) == 1
+        assert results[0]["message"] == "No clips due for refresh"

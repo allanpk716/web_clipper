@@ -225,6 +225,51 @@ class ClipIndex:
         conn.commit()
         return cursor.rowcount > 0
 
+    # ── Refresh helpers ─────────────────────────────────────────────
+
+    def get_refreshable_clips(self) -> list[dict[str, Any]]:
+        """Return clips that are dynamic (``is_dynamic=1``) and due for refresh.
+
+        A clip is due when its ``last_refreshed_at`` is ``None`` or older
+        than ``refresh_interval_days`` ago.
+        """
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM clips WHERE is_dynamic = 1 ORDER BY id ASC"
+        ).fetchall()
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            d = self._row_to_dict(row)
+            last = d.get("last_refreshed_at")
+            interval = d.get("refresh_interval_days", 7)
+            if self._is_expired(last, interval):
+                results.append(d)
+        return results
+
+    @staticmethod
+    def _is_expired(last_refreshed_at: str | None, interval_days: int | None) -> bool:
+        """Return ``True`` when *last_refreshed_at* is empty or older than *interval_days*."""
+        if not last_refreshed_at:
+            return True
+        interval_days = interval_days or 7
+        try:
+            last_dt = datetime.fromisoformat(last_refreshed_at)
+        except (ValueError, TypeError):
+            return True
+        delta = (datetime.now() - last_dt).total_seconds() / 86400
+        return delta >= interval_days
+
+    def mark_refreshed(self, clip_id: int) -> bool:
+        """Update ``last_refreshed_at`` on *clip_id* to the current time."""
+        conn = self._connect()
+        now = datetime.now().isoformat()
+        cursor = conn.execute(
+            "UPDATE clips SET last_refreshed_at = ?, updated_at = ? WHERE id = ?",
+            (now, now, clip_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
     # ── Update ───────────────────────────────────────────────────────
 
     def update_clip(self, clip_id: int, updates: dict[str, Any]) -> bool:
