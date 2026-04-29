@@ -15,8 +15,9 @@ from ..adapter import adapter_router
 from .github import GitHubAdapter
 from .generic import GenericWebAdapter
 from .weibo import WeiboAdapter
+from .wechat import WeChatAdapter
 
-__all__ = ["GitHubAdapter", "GenericWebAdapter", "WeiboAdapter"]
+__all__ = ["GitHubAdapter", "GenericWebAdapter", "WeiboAdapter", "WeChatAdapter"]
 
 # Re-export for convenience
 __all__: list[str]  # type: ignore[no-redef]
