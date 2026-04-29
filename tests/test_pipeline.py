@@ -325,6 +325,361 @@ class TestReplaceImageUrls:
         assert "https://example.com/logo.png" in result
 
 
+class TestLLMEnrichment:
+    """Tests for LLM enrichment integration in the pipeline."""
+
+    @patch("web_clip_helper.pipeline.download_images")
+    @patch("web_clip_helper.pipeline.route_url")
+    def test_llm_enrichment_populates_tags_and_category(
+        self,
+        mock_route: MagicMock,
+        mock_dl: MagicMock,
+        tmp_path: Path,
+        capsys,
+    ) -> None:
+        """Pipeline with mocked LLM returns tags and category in SQLite."""
+        from web_clip_helper.adapters.github import GitHubAdapter
+        from web_clip_helper.config import LLMConfig
+
+        config = Config(
+            storage_path=str(tmp_path / "clips"),
+            db_path=str(tmp_path / "test.db"),
+            llm=LLMConfig(api_key="test-key", model="test-model"),
+        )
+
+        mock_route.return_value = GitHubAdapter
+        mock_dl.return_value = {}
+
+        raw = RawContent(
+            url="https://example.com/article",
+            title="Original Title",
+            content_md="This is a test article about Python.",
+            images=[],
+            source_type="web",
+        )
+
+        with patch.object(GitHubAdapter, "fetch", return_value=raw):
+            with patch("web_clip_helper.pipeline.LLMClient") as MockLLM:
+                mock_client = MockLLM.return_value
+                mock_client.generate_title.return_value = "LLM Generated Title"
+                mock_client.extract_tags.return_value = ["python", "programming"]
+                mock_client.classify_content.return_value = "技术"
+
+                result = clip_url("https://example.com/article", config)
+
+        assert result is not None
+        assert result.record_id is not None
+
+        from web_clip_helper.index import ClipIndex
+        idx = ClipIndex(config.db_path)
+        record = idx.get_clip(result.record_id)
+        assert record is not None
+        assert record["title"] == "LLM Generated Title"
+        assert record["tags"] == ["python", "programming"]
+        assert record["category"] == "技术"
+        idx.close()
+
+        # Verify JSONL result includes tags and category
+        messages = _capture_jsonl(capsys)
+        result_msgs = [m for m in messages if m["type"] == "result"]
+        assert len(result_msgs) == 1
+        assert result_msgs[0]["tags"] == ["python", "programming"]
+        assert result_msgs[0]["category"] == "技术"
+
+    @patch("web_clip_helper.pipeline.download_images")
+    @patch("web_clip_helper.pipeline.route_url")
+    def test_llm_failure_uses_fallback(
+        self,
+        mock_route: MagicMock,
+        mock_dl: MagicMock,
+        tmp_path: Path,
+        capsys,
+    ) -> None:
+        """LLM throws exception → fallback title, empty tags/category, warning emitted."""
+        from web_clip_helper.adapters.github import GitHubAdapter
+        from web_clip_helper.config import LLMConfig
+
+        config = Config(
+            storage_path=str(tmp_path / "clips"),
+            db_path=str(tmp_path / "test.db"),
+            llm=LLMConfig(api_key="test-key"),
+        )
+
+        mock_route.return_value = GitHubAdapter
+        mock_dl.return_value = {}
+
+        raw = RawContent(
+            url="https://example.com/article",
+            title="Fallback Title",
+            content_md="Content here",
+            images=[],
+            source_type="web",
+        )
+
+        with patch.object(GitHubAdapter, "fetch", return_value=raw):
+            with patch("web_clip_helper.pipeline.LLMClient") as MockLLM:
+                mock_client = MockLLM.return_value
+                mock_client.generate_title.side_effect = Exception("API error")
+
+                result = clip_url("https://example.com/article", config)
+
+        assert result is not None
+        from web_clip_helper.index import ClipIndex
+        idx = ClipIndex(config.db_path)
+        record = idx.get_clip(result.record_id)
+        assert record is not None
+        assert record["title"] == "Fallback Title"
+        assert record["tags"] == []
+        assert record["category"] == ""
+        idx.close()
+
+        # Warning should be emitted
+        messages = _capture_jsonl(capsys)
+        warnings = [m for m in messages if m["type"] == "warning"]
+        assert any("llm" in str(w).lower() for w in warnings)
+
+    @patch("web_clip_helper.pipeline.download_images")
+    @patch("web_clip_helper.pipeline.route_url")
+    def test_no_api_key_skips_llm(
+        self,
+        mock_route: MagicMock,
+        mock_dl: MagicMock,
+        tmp_path: Path,
+        capsys,
+    ) -> None:
+        """No API key → LLMClient is never instantiated, warning emitted."""
+        from web_clip_helper.adapters.github import GitHubAdapter
+
+        config = Config(
+            storage_path=str(tmp_path / "clips"),
+            db_path=str(tmp_path / "test.db"),
+        )
+
+        mock_route.return_value = GitHubAdapter
+        mock_dl.return_value = {}
+
+        raw = RawContent(
+            url="https://example.com/article",
+            title="No API Key Title",
+            content_md="Content",
+            images=[],
+            source_type="web",
+        )
+
+        with patch.object(GitHubAdapter, "fetch", return_value=raw):
+            with patch("web_clip_helper.pipeline.LLMClient") as MockLLM:
+                result = clip_url("https://example.com/article", config)
+                # LLMClient should NOT be instantiated
+                MockLLM.assert_not_called()
+
+        assert result is not None
+        from web_clip_helper.index import ClipIndex
+        idx = ClipIndex(config.db_path)
+        record = idx.get_clip(result.record_id)
+        assert record is not None
+        assert record["tags"] == []
+        assert record["category"] == ""
+        idx.close()
+
+        # Warning should be emitted about no API key
+        messages = _capture_jsonl(capsys)
+        warnings = [m for m in messages if m["type"] == "warning"]
+        assert any("no API key" in str(w) for w in warnings)
+
+    @patch("web_clip_helper.pipeline.download_images")
+    @patch("web_clip_helper.pipeline.route_url")
+    def test_llm_title_used_for_storage_directory(
+        self,
+        mock_route: MagicMock,
+        mock_dl: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """LLM-generated title is used for the storage directory name."""
+        from web_clip_helper.adapters.github import GitHubAdapter
+        from web_clip_helper.config import LLMConfig
+
+        config = Config(
+            storage_path=str(tmp_path / "clips"),
+            db_path=str(tmp_path / "test.db"),
+            llm=LLMConfig(api_key="test-key"),
+        )
+
+        mock_route.return_value = GitHubAdapter
+        mock_dl.return_value = {}
+
+        raw = RawContent(
+            url="https://example.com/article",
+            title="Original Title",
+            content_md="Content",
+            images=[],
+            source_type="web",
+        )
+
+        with patch.object(GitHubAdapter, "fetch", return_value=raw):
+            with patch("web_clip_helper.pipeline.LLMClient") as MockLLM:
+                mock_client = MockLLM.return_value
+                mock_client.generate_title.return_value = "LLM Custom Title"
+                mock_client.extract_tags.return_value = []
+                mock_client.classify_content.return_value = ""
+
+                result = clip_url("https://example.com/article", config)
+
+        assert result is not None
+        # Directory name should contain the LLM-generated title (spaces preserved)
+        assert "LLM Custom Title" in result.folder_path.name
+
+    @patch("web_clip_helper.pipeline.download_images")
+    @patch("web_clip_helper.pipeline.route_url")
+    def test_llm_enrichment_progress_messages(
+        self,
+        mock_route: MagicMock,
+        mock_dl: MagicMock,
+        tmp_path: Path,
+        capsys,
+    ) -> None:
+        """LLM enrichment emits start/complete progress messages."""
+        from web_clip_helper.adapters.github import GitHubAdapter
+        from web_clip_helper.config import LLMConfig
+
+        config = Config(
+            storage_path=str(tmp_path / "clips"),
+            db_path=str(tmp_path / "test.db"),
+            llm=LLMConfig(api_key="test-key"),
+        )
+
+        mock_route.return_value = GitHubAdapter
+        mock_dl.return_value = {}
+
+        raw = RawContent(
+            url="https://example.com/article",
+            title="Title",
+            content_md="Content",
+            images=[],
+            source_type="web",
+        )
+
+        with patch.object(GitHubAdapter, "fetch", return_value=raw):
+            with patch("web_clip_helper.pipeline.LLMClient") as MockLLM:
+                mock_client = MockLLM.return_value
+                mock_client.generate_title.return_value = "Title"
+                mock_client.extract_tags.return_value = []
+                mock_client.classify_content.return_value = ""
+
+                result = clip_url("https://example.com/article", config)
+
+        assert result is not None
+        messages = _capture_jsonl(capsys)
+        progress_msgs = [m for m in messages if m["type"] == "progress"]
+        progress_texts = [m["message"] for m in progress_msgs]
+        assert any("LLM enrichment starting" in t for t in progress_texts)
+        assert any("LLM enrichment complete" in t for t in progress_texts)
+
+    def test_clip_text_with_llm_enrichment(
+        self,
+        tmp_path: Path,
+        capsys,
+    ) -> None:
+        """clip_text also gets LLM enrichment when API key present."""
+        from web_clip_helper.config import LLMConfig
+
+        config = Config(
+            storage_path=str(tmp_path / "clips"),
+            db_path=str(tmp_path / "test.db"),
+            llm=LLMConfig(api_key="test-key"),
+        )
+
+        with patch("web_clip_helper.pipeline.LLMClient") as MockLLM:
+            mock_client = MockLLM.return_value
+            mock_client.generate_title.return_value = "Text Clip Title"
+            mock_client.extract_tags.return_value = ["notes"]
+            mock_client.classify_content.return_value = "生活"
+
+            result = clip_text("Some raw text content here", config)
+
+        assert result is not None
+        from web_clip_helper.index import ClipIndex
+        idx = ClipIndex(config.db_path)
+        record = idx.get_clip(result.record_id)
+        assert record is not None
+        assert record["title"] == "Text Clip Title"
+        assert record["tags"] == ["notes"]
+        assert record["category"] == "生活"
+        idx.close()
+
+    def test_clip_text_no_api_key_no_llm_call(
+        self,
+        tmp_path: Path,
+        capsys,
+    ) -> None:
+        """clip_text with no API key: no LLM call, fallback values in SQLite."""
+        config = Config(
+            storage_path=str(tmp_path / "clips"),
+            db_path=str(tmp_path / "test.db"),
+        )
+
+        with patch("web_clip_helper.pipeline.LLMClient") as MockLLM:
+            result = clip_text("Some text content", config)
+            MockLLM.assert_not_called()
+
+        assert result is not None
+        from web_clip_helper.index import ClipIndex
+        idx = ClipIndex(config.db_path)
+        record = idx.get_clip(result.record_id)
+        assert record is not None
+        assert record["tags"] == []
+        assert record["category"] == ""
+        idx.close()
+
+    @patch("web_clip_helper.pipeline.download_images")
+    @patch("web_clip_helper.pipeline.route_url")
+    def test_llm_empty_response_uses_fallback(
+        self,
+        mock_route: MagicMock,
+        mock_dl: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """LLM returns empty/None for all methods → fallback values used."""
+        from web_clip_helper.adapters.github import GitHubAdapter
+        from web_clip_helper.config import LLMConfig
+
+        config = Config(
+            storage_path=str(tmp_path / "clips"),
+            db_path=str(tmp_path / "test.db"),
+            llm=LLMConfig(api_key="test-key"),
+        )
+
+        mock_route.return_value = GitHubAdapter
+        mock_dl.return_value = {}
+
+        raw = RawContent(
+            url="https://example.com/article",
+            title="Fallback Title",
+            content_md="Content",
+            images=[],
+            source_type="web",
+        )
+
+        with patch.object(GitHubAdapter, "fetch", return_value=raw):
+            with patch("web_clip_helper.pipeline.LLMClient") as MockLLM:
+                mock_client = MockLLM.return_value
+                # generate_title returns empty → LLMClient itself falls back
+                mock_client.generate_title.return_value = "Fallback Title"
+                mock_client.extract_tags.return_value = []
+                mock_client.classify_content.return_value = ""
+
+                result = clip_url("https://example.com/article", config)
+
+        assert result is not None
+        from web_clip_helper.index import ClipIndex
+        idx = ClipIndex(config.db_path)
+        record = idx.get_clip(result.record_id)
+        assert record is not None
+        assert record["title"] == "Fallback Title"
+        assert record["tags"] == []
+        assert record["category"] == ""
+        idx.close()
+
+
 class TestNegativePaths:
     """Negative tests for error handling and boundary conditions."""
 

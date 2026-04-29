@@ -155,6 +155,41 @@ class ClipIndex:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    # ── Update ───────────────────────────────────────────────────────
+
+    def update_clip(self, clip_id: int, updates: dict[str, Any]) -> bool:
+        """Update one or more columns on an existing clip record.
+
+        Parameters
+        ----------
+        clip_id:
+            The row id to update.
+        updates:
+            Column-value pairs to set.  ``tags`` as a list is serialised
+            to JSON automatically.  ``updated_at`` is always refreshed.
+
+        Returns
+        -------
+        bool
+            ``True`` if a row was updated, ``False`` if *clip_id* not found.
+        """
+        conn = self._connect()
+
+        # Serialise tags list → JSON string
+        if "tags" in updates and isinstance(updates["tags"], list):
+            updates["tags"] = json.dumps(updates["tags"])
+
+        updates["updated_at"] = datetime.now().isoformat()
+
+        set_clause = ", ".join(f"{col} = ?" for col in updates)
+        values = list(updates.values()) + [clip_id]
+
+        cursor = conn.execute(
+            f"UPDATE clips SET {set_clause} WHERE id = ?", values
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
     # ── Helpers ──────────────────────────────────────────────────────
 
     @staticmethod

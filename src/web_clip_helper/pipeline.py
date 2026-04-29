@@ -19,6 +19,7 @@ from .adapter import AdapterError, route_url
 from .config import Config
 from .images import download_images
 from .index import ClipIndex
+from .llm import LLMClient
 from .models import ClipResult, RawContent
 from .output import (
     jsonl_emit_error,
@@ -143,10 +144,54 @@ def clip_text(text: str, config: Config) -> ClipResult | None:
     return _store_and_index(raw, config)
 
 
+def _enrich_with_llm(
+    raw: RawContent,
+    config: Config,
+) -> tuple[str, list[str], str]:
+    """Try LLM enrichment; return (title, tags, category) with fallback.
+
+    When the LLM is unavailable (no API key, network error, malformed
+    response) the pipeline keeps running with sensible defaults:
+    title from *raw.title* or a timestamp-derived string, empty tags,
+    and an empty category.
+    """
+    # Fast path: no API key → skip LLM entirely
+    if not config.llm.api_key or not config.llm.api_key.strip():
+        jsonl_emit_warning(
+            message="LLM enrichment skipped: no API key configured",
+            stage="llm",
+        )
+        title = raw.title or "untitled"
+        return title, [], ""
+
+    jsonl_emit_progress(message="LLM enrichment starting", percent=35)
+
+    client = LLMClient(config.llm)
+    try:
+        title = client.generate_title(raw.content_md, raw.source_type, raw.url)
+        tags = client.extract_tags(raw.content_md, raw.source_type)
+        category = client.classify_content(raw.content_md, raw.source_type)
+    except Exception as exc:
+        jsonl_emit_warning(
+            message=f"LLM enrichment failed: {exc}",
+            stage="llm",
+        )
+        title = raw.title or "untitled"
+        tags: list[str] = []
+        category = ""
+        return title, tags, category
+
+    jsonl_emit_progress(message="LLM enrichment complete", percent=45)
+    return title, tags, category
+
+
 def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
-    """Shared pipeline: storage → images → markdown save → SQLite index."""
+    """Shared pipeline: LLM enrichment → storage → images → markdown save → SQLite index."""
     storage = StorageManager(config.storage_path)
-    title = raw.title or "untitled"
+
+    # 2b. LLM enrichment
+    llm_title, llm_tags, llm_category = _enrich_with_llm(raw, config)
+    title = llm_title
 
     # 3. Create storage entry
     try:
@@ -219,6 +264,8 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
             "folder_path": str(entry_path),
             "markdown_path": str(md_path),
             "image_count": image_count,
+            "tags": llm_tags,
+            "category": llm_category,
         })
         index.close()
     except Exception as exc:
@@ -246,6 +293,8 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
         markdown=str(md_path),
         image_count=image_count,
         record_id=record_id,
+        tags=llm_tags,
+        category=llm_category,
     )
 
     jsonl_emit_progress(message="Clip complete", percent=100)
