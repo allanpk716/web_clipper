@@ -155,6 +155,76 @@ class ClipIndex:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    # ── Tag / Search helpers ─────────────────────────────────────────
+
+    def query_clips_by_tag(self, tag: str) -> list[dict[str, Any]]:
+        """Return clips whose tags JSON array contains *tag*.
+
+        Uses SQLite JSON functions to query inside the stored JSON array.
+        Falls back to a Python-side filter when json1 extension is absent.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM clips WHERE tags LIKE ? ORDER BY id DESC",
+                (f'%"{tag}"%',),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # Fallback: filter in Python if JSON functions unavailable
+            rows = conn.execute("SELECT * FROM clips ORDER BY id DESC").fetchall()
+            results = []
+            for r in rows:
+                d = self._row_to_dict(r)
+                if tag in d.get("tags", []):
+                    results.append(d)
+            return results
+        return [self._row_to_dict(r) for r in rows]
+
+    def search_clips(self, keyword: str) -> list[dict[str, Any]]:
+        """Search clips by keyword in title and url (case-insensitive LIKE)."""
+        conn = self._connect()
+        pattern = f"%{keyword}%"
+        rows = conn.execute(
+            "SELECT * FROM clips WHERE title LIKE ? OR url LIKE ? ORDER BY id DESC",
+            (pattern, pattern),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def list_tags(self) -> list[dict[str, Any]]:
+        """Return all unique tags with their usage counts.
+
+        Scans every clip, deserialises the tags JSON, and aggregates counts.
+        Returns a list of ``{"tag": str, "count": int}`` sorted by count descending.
+        """
+        conn = self._connect()
+        rows = conn.execute("SELECT tags FROM clips").fetchall()
+        counts: dict[str, int] = {}
+        for row in rows:
+            tags_raw = row["tags"]
+            if isinstance(tags_raw, str):
+                try:
+                    tags_list = json.loads(tags_raw)
+                except (json.JSONDecodeError, TypeError):
+                    tags_list = []
+            elif isinstance(tags_raw, list):
+                tags_list = tags_raw
+            else:
+                tags_list = []
+            for t in tags_list:
+                if isinstance(t, str) and t:
+                    counts[t] = counts.get(t, 0) + 1
+        return [
+            {"tag": tag, "count": cnt}
+            for tag, cnt in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
+        ]
+
+    def delete_clip(self, clip_id: int) -> bool:
+        """Delete a clip record by id. Returns True if a row was deleted."""
+        conn = self._connect()
+        cursor = conn.execute("DELETE FROM clips WHERE id = ?", (clip_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
     # ── Update ───────────────────────────────────────────────────────
 
     def update_clip(self, clip_id: int, updates: dict[str, Any]) -> bool:
