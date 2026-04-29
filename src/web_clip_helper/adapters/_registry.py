@@ -15,6 +15,7 @@ from ..adapter import adapter_router
 from .github import GitHubAdapter
 from .generic import GenericWebAdapter
 from .weibo_headline import WeiboHeadlineAdapter
+from .weibo_card import WeiboCardAdapter
 from .weibo import WeiboAdapter
 from .wechat import WeChatAdapter
 
@@ -22,6 +23,7 @@ __all__ = [
     "GitHubAdapter",
     "GenericWebAdapter",
     "WeiboHeadlineAdapter",
+    "WeiboCardAdapter",
     "WeiboAdapter",
     "WeChatAdapter",
 ]
