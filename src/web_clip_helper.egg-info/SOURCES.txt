@@ -1,0 +1,13 @@
+pyproject.toml
+src/web_clip_helper/__init__.py
+src/web_clip_helper/cli.py
+src/web_clip_helper/config.py
+src/web_clip_helper/output.py
+src/web_clip_helper.egg-info/PKG-INFO
+src/web_clip_helper.egg-info/SOURCES.txt
+src/web_clip_helper.egg-info/dependency_links.txt
+src/web_clip_helper.egg-info/entry_points.txt
+src/web_clip_helper.egg-info/requires.txt
+src/web_clip_helper.egg-info/top_level.txt
+tests/test_config.py
+tests/test_output.py

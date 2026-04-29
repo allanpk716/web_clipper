@@ -1,0 +1,2 @@
+[console_scripts]
+web-clip-helper = web_clip_helper.cli:app

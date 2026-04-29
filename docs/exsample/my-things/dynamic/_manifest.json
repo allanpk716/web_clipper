@@ -1,0 +1,25 @@
+{
+  "_description": "动态内容清单 — 每周一北京时间凌晨3点自动更新",
+  "repos": [
+    {
+      "folder": "2026-04-10_AI代码知识图谱工具",
+      "url": "https://github.com/safishamsi/graphify",
+      "source_type": "github"
+    },
+    {
+      "folder": "2026-04-10_WeFlow项目文件夹",
+      "url": "https://github.com/hicccc77/WeFlow",
+      "source_type": "github"
+    },
+    {
+      "folder": "2026-04-12_RTK_Rust_Token_Killer",
+      "url": "https://github.com/rtk-ai/rtk",
+      "source_type": "github"
+    },
+    {
+      "folder": "2026-04-13_MediaCrawler_Github_20260413",
+      "url": "https://github.com/NanmiCoder/MediaCrawler",
+      "source_type": "github"
+    }
+  ]
+}

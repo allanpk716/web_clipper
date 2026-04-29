@@ -1,0 +1,17 @@
+{
+  "_description": "静态内容清单 — 无需定期更新",
+  "items": [
+    {
+      "folder": "2026-04-11_宝玉xp_手绘风信息图提示词选项-1使用-baoyu-skills-的",
+      "source_type": "weibo"
+    },
+    {
+      "folder": "2026-04-12_爱可可-爱生活_AI模型训练时被注入拒绝机制，遇到敏感话题就自动拒绝回答，限",
+      "source_type": "weibo"
+    },
+    {
+      "folder": "2026-04-13_多智能体协作指南五种主流模式怎么选怎么用",
+      "source_type": "weibo-headline"
+    }
+  ]
+}
