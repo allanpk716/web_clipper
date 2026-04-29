@@ -833,3 +833,174 @@ class TestNegativePaths:
 
         assert result is not None
         assert result.image_count == 55
+
+
+class TestExtraFiles:
+    """Tests for pipeline extra_files (PDF, etc.) persistence."""
+
+    @patch("web_clip_helper.pipeline.download_images")
+    @patch("web_clip_helper.pipeline.route_url")
+    def test_extra_files_triggers_file_saves(
+        self,
+        mock_route: MagicMock,
+        mock_dl: MagicMock,
+        config: Config,
+    ) -> None:
+        """RawContent with extra_files causes files to be saved to disk."""
+        from web_clip_helper.adapters.github import GitHubAdapter
+
+        mock_route.return_value = GitHubAdapter
+        mock_dl.return_value = {}
+
+        pdf_bytes = b"%PDF-1.4 fake content"
+        raw = RawContent(
+            url="https://arxiv.org/abs/2603.00195",
+            title="Test Paper",
+            content_md="# Test Paper\n\nAbstract here.",
+            images=[],
+            source_type="arxiv",
+            extra_files={"paper.pdf": pdf_bytes},
+        )
+
+        with patch.object(GitHubAdapter, "fetch", return_value=raw):
+            result = clip_url("https://arxiv.org/abs/2603.00195", config)
+
+        assert result is not None
+        # The PDF file should exist in the entry directory
+        pdf_path = result.folder_path / "paper.pdf"
+        assert pdf_path.exists()
+        assert pdf_path.read_bytes() == pdf_bytes
+
+    @patch("web_clip_helper.pipeline.download_images")
+    @patch("web_clip_helper.pipeline.route_url")
+    def test_extra_files_jsonl_progress(
+        self,
+        mock_route: MagicMock,
+        mock_dl: MagicMock,
+        config: Config,
+        capsys,
+    ) -> None:
+        """Saving extra_files emits JSONL progress messages."""
+        from web_clip_helper.adapters.github import GitHubAdapter
+
+        mock_route.return_value = GitHubAdapter
+        mock_dl.return_value = {}
+
+        raw = RawContent(
+            url="https://arxiv.org/abs/2603.00195",
+            title="Progress Test",
+            content_md="# Test",
+            images=[],
+            source_type="arxiv",
+            extra_files={"doc.pdf": b"%PDF-1.4 test"},
+        )
+
+        with patch.object(GitHubAdapter, "fetch", return_value=raw):
+            result = clip_url("https://arxiv.org/abs/2603.00195", config)
+
+        assert result is not None
+        messages = _capture_jsonl(capsys)
+        progress_msgs = [m for m in messages if m["type"] == "progress"]
+        progress_texts = [m["message"] for m in progress_msgs]
+        assert any("Saved extra file" in t for t in progress_texts)
+
+    @patch("web_clip_helper.pipeline.download_images")
+    @patch("web_clip_helper.pipeline.route_url")
+    def test_extra_file_save_failure_returns_none(
+        self,
+        mock_route: MagicMock,
+        mock_dl: MagicMock,
+        config: Config,
+        capsys,
+    ) -> None:
+        """If save_file fails for an extra file, pipeline returns None (fatal)."""
+        from web_clip_helper.adapters.github import GitHubAdapter
+
+        mock_route.return_value = GitHubAdapter
+        mock_dl.return_value = {}
+
+        raw = RawContent(
+            url="https://arxiv.org/abs/2603.00195",
+            title="Fail Test",
+            content_md="# Test",
+            images=[],
+            source_type="arxiv",
+            extra_files={"bad.pdf": b"content"},
+        )
+
+        with patch.object(GitHubAdapter, "fetch", return_value=raw):
+            with patch(
+                "web_clip_helper.pipeline.StorageManager.save_file",
+                side_effect=OSError("disk full"),
+            ):
+                result = clip_url("https://arxiv.org/abs/2603.00195", config)
+
+        assert result is None
+        messages = _capture_jsonl(capsys)
+        errors = [m for m in messages if m["type"] == "error"]
+        assert any(e["stage"] == "storage" for e in errors)
+
+    @patch("web_clip_helper.pipeline.download_images")
+    @patch("web_clip_helper.pipeline.route_url")
+    def test_extra_files_multiple(
+        self,
+        mock_route: MagicMock,
+        mock_dl: MagicMock,
+        config: Config,
+    ) -> None:
+        """Multiple extra_files are all saved."""
+        from web_clip_helper.adapters.github import GitHubAdapter
+
+        mock_route.return_value = GitHubAdapter
+        mock_dl.return_value = {}
+
+        raw = RawContent(
+            url="https://arxiv.org/abs/2603.00195",
+            title="Multi File Test",
+            content_md="# Test",
+            images=[],
+            source_type="arxiv",
+            extra_files={
+                "paper.pdf": b"%PDF-1.4 content",
+                "supplement.pdf": b"%PDF-1.5 supplement",
+            },
+        )
+
+        with patch.object(GitHubAdapter, "fetch", return_value=raw):
+            result = clip_url("https://arxiv.org/abs/2603.00195", config)
+
+        assert result is not None
+        assert (result.folder_path / "paper.pdf").exists()
+        assert (result.folder_path / "supplement.pdf").exists()
+        assert (result.folder_path / "paper.pdf").read_bytes() == b"%PDF-1.4 content"
+        assert (result.folder_path / "supplement.pdf").read_bytes() == b"%PDF-1.5 supplement"
+
+    @patch("web_clip_helper.pipeline.download_images")
+    @patch("web_clip_helper.pipeline.route_url")
+    def test_no_extra_files_no_extra_saves(
+        self,
+        mock_route: MagicMock,
+        mock_dl: MagicMock,
+        config: Config,
+    ) -> None:
+        """RawContent without extra_files doesn't trigger save_file."""
+        from web_clip_helper.adapters.github import GitHubAdapter
+
+        mock_route.return_value = GitHubAdapter
+        mock_dl.return_value = {}
+
+        raw = RawContent(
+            url="https://github.com/test/repo",
+            title="No Extra",
+            content_md="# Just markdown",
+            images=[],
+            source_type="github",
+            extra_files={},
+        )
+
+        with patch.object(GitHubAdapter, "fetch", return_value=raw):
+            with patch("web_clip_helper.pipeline.StorageManager.save_file") as mock_save:
+                result = clip_url("https://github.com/test/repo", config)
+
+        assert result is not None
+        mock_save.assert_not_called()

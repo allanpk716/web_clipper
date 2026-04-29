@@ -136,3 +136,60 @@ class TestStorageManager:
         assert entry.name == "2024-07-04_Independence Day"
         assert md == entry / "2024-07-04_Independence Day.md"
         assert (entry / "images").is_dir()
+
+    # ── save_file tests ──────────────────────────────────────────────
+
+    def test_save_file_writes_binary_content(self, store: StorageManager):
+        """save_file writes raw binary content correctly."""
+        entry = store.create_entry("PDF Test", datetime(2024, 8, 1))
+        pdf_bytes = b"%PDF-1.4 fake pdf content \x00\x01\x02"
+        result = store.save_file(entry, "paper.pdf", pdf_bytes)
+
+        assert result == entry / "paper.pdf"
+        assert result.exists()
+        assert result.read_bytes() == pdf_bytes
+
+    def test_save_file_roundtrip_binary(self, store: StorageManager):
+        """Binary data round-trips through save_file without corruption."""
+        import os
+        entry = store.create_entry("Binary Test", datetime(2024, 8, 2))
+        # 1 KB of random binary data
+        data = os.urandom(1024)
+        result = store.save_file(entry, "random.bin", data)
+        assert result.read_bytes() == data
+
+    def test_save_file_raises_on_invalid_path(self, store: StorageManager):
+        """save_file raises OSError when writing to an invalid path."""
+        entry = store.create_entry("Bad Path", datetime(2024, 8, 3))
+        # Use a filename with null bytes which is invalid on most OSes.
+        # Windows raises ValueError (subclass of OSError via PEP 3151),
+        # other OSes may raise OSError.
+        with pytest.raises((OSError, ValueError)):
+            store.save_file(entry, "bad\x00file.pdf", b"content")
+
+    def test_save_file_unicode_filename(self, store: StorageManager):
+        """save_file handles Unicode filenames (e.g. Chinese characters)."""
+        entry = store.create_entry("Unicode Test", datetime(2024, 8, 4))
+        data = b"%PDF-1.4 test"
+        result = store.save_file(entry, "中文论文.pdf", data)
+
+        assert result == entry / "中文论文.pdf"
+        assert result.exists()
+        assert result.read_bytes() == data
+
+    def test_save_file_overwrites_existing(self, store: StorageManager):
+        """save_file overwrites an existing file with the same name."""
+        entry = store.create_entry("Overwrite Test", datetime(2024, 8, 5))
+        store.save_file(entry, "data.bin", b"original")
+        result = store.save_file(entry, "data.bin", b"updated")
+
+        assert result.read_bytes() == b"updated"
+
+    def test_save_file_large_content(self, store: StorageManager):
+        """save_file handles larger binary content (1 MB)."""
+        entry = store.create_entry("Large File", datetime(2024, 8, 6))
+        data = b"\x00" * (1024 * 1024)  # 1 MB of null bytes
+        result = store.save_file(entry, "large.pdf", data)
+
+        assert result.exists()
+        assert result.stat().st_size == 1024 * 1024
