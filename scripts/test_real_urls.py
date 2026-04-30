@@ -486,10 +486,9 @@ def main() -> None:
     else:
         output_dir = Path(tempfile.mkdtemp(prefix="web-clip-inttest-"))
 
-    config = Config(
-        storage_path=str(output_dir / "clips"),
-        db_path=str(output_dir / "clips.db"),
-    )
+    config = Config.load()
+    config.storage_path = str(output_dir / "clips")
+    config.db_path = str(output_dir / "clips.db")
     # Ensure storage dirs exist
     Path(config.storage_path).mkdir(parents=True, exist_ok=True)
 
