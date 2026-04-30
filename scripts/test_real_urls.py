@@ -129,6 +129,19 @@ def _extract_urls_from_manifests() -> list[TestURL]:
                     )
                 )
 
+    # ── Supplementary URLs not in baseline data ──────────────────
+    # Arxiv and other adapters that have no corresponding baseline folder
+    SUPPLEMENTARY_URLS = [
+        {
+            "url": "https://arxiv.org/abs/2603.00195",
+            "source_type": "arxiv",
+            "folder": "supplementary",
+            "manifest": "supplementary",
+        },
+    ]
+    for item in SUPPLEMENTARY_URLS:
+        urls.append(TestURL(**item))
+
     return urls
 
 

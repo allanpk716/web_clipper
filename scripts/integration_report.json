@@ -1,7 +1,7 @@
 {
   "aggregate": {
-    "total": 25,
-    "passed": 25,
+    "total": 26,
+    "passed": 26,
     "failed": 0,
     "errors": 0,
     "pass_rate": 100.0,
@@ -29,6 +29,12 @@
         "passed": 1,
         "failed": 0,
         "errors": 0
+      },
+      "arxiv": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "errors": 0
       }
     }
   },
@@ -41,7 +47,7 @@
       "image_count": 1,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 3812.000000034459,
+      "elapsed_ms": 6625.0,
       "folder": "2026-04-10_AI代码知识图谱工具",
       "title": "graphify"
     },
@@ -53,7 +59,7 @@
       "image_count": 8,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 6547.000000020489,
+      "elapsed_ms": 9250.0,
       "folder": "2026-04-10_WeFlow项目文件夹",
       "title": "WeFlow"
     },
@@ -65,7 +71,7 @@
       "image_count": 8,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 9155.999999959022,
+      "elapsed_ms": 11047.00000002049,
       "folder": "2026-04-12_RTK_Rust_Token_Killer",
       "title": "1. Install for your AI tool"
     },
@@ -77,7 +83,7 @@
       "image_count": 16,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 12327.99999997951,
+      "elapsed_ms": 12280.999999959022,
       "folder": "2026-04-13_MediaCrawler_Github_20260413",
       "title": "🔥 MediaCrawler - 自媒体平台爬虫 🕷️"
     },
@@ -89,7 +95,7 @@
       "image_count": 4,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 3094.000000040978,
+      "elapsed_ms": 2172.000000020489,
       "folder": "2026-04-11_宝玉xp手绘风信息图提示词选项",
       "title": ""
     },
@@ -101,7 +107,7 @@
       "image_count": 1,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 1562.999999965541,
+      "elapsed_ms": 1500.0,
       "folder": "2026-04-12_AI模型拒绝机制破解与解放",
       "title": ""
     },
@@ -113,7 +119,7 @@
       "image_count": 3,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 1922.000000020489,
+      "elapsed_ms": 1969.0000000409782,
       "folder": "2026-04-13_3B1B主控动画技能开发",
       "title": ""
     },
@@ -125,7 +131,7 @@
       "image_count": 1,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 1452.999999979511,
+      "elapsed_ms": 1530.9999999590218,
       "folder": "2026-04-13_AI-Trader智能交易全平台",
       "title": ""
     },
@@ -137,7 +143,7 @@
       "image_count": 1,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 1452.999999979511,
+      "elapsed_ms": 1577.999999979511,
       "folder": "2026-04-13_AI大语言模型入门实践",
       "title": ""
     },
@@ -149,7 +155,7 @@
       "image_count": 0,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 844.0000000409782,
+      "elapsed_ms": 891.0000000614673,
       "folder": "2026-04-13_AI就业影响研究：金字塔到钻石的转型",
       "title": ""
     },
@@ -161,7 +167,7 @@
       "image_count": 1,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 1562.000000034459,
+      "elapsed_ms": 1655.9999999590218,
       "folder": "2026-04-13_AI编码工具优化：代码库知识图谱",
       "title": ""
     },
@@ -173,7 +179,7 @@
       "image_count": 6,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 2202.999999979511,
+      "elapsed_ms": 2484.99999998603,
       "folder": "2026-04-13_Claude-Code-Game-Studios体验",
       "title": ""
     },
@@ -185,7 +191,7 @@
       "image_count": 4,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 2047.000000020489,
+      "elapsed_ms": 4312.000000034459,
       "folder": "2026-04-13_Gemma4提速秘籍_23%速度提升解码法",
       "title": ""
     },
@@ -209,7 +215,7 @@
       "image_count": 3,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 2280.999999959022,
+      "elapsed_ms": 2952.999999979511,
       "folder": "2026-04-13_MQuickJS：10kB内存跑JS引擎",
       "title": "10kB 内存跑 JS 引擎？V8 的千分之一大小，这位传奇程序员又出手了"
     },
@@ -221,7 +227,7 @@
       "image_count": 6,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 2125.0,
+      "elapsed_ms": 2280.999999959022,
       "folder": "2026-04-13_Simon白日梦：Karpathy llm-wiki.md应用",
       "title": ""
     },
@@ -233,7 +239,7 @@
       "image_count": 1,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 1656.0000000754371,
+      "elapsed_ms": 1516.0000000614673,
       "folder": "2026-04-13_Windows一键清理垃圾软件",
       "title": ""
     },
@@ -245,7 +251,7 @@
       "image_count": 11,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 2937.999999965541,
+      "elapsed_ms": 3015.999999945052,
       "folder": "2026-04-13_多智能体协作模式选择指南",
       "title": "多智能体协作指南：五种主流模式怎么选、怎么用？"
     },
@@ -257,7 +263,7 @@
       "image_count": 0,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 827.9999999795109,
+      "elapsed_ms": 842.9999999934807,
       "folder": "2026-04-13_智能体身份认证授权思考",
       "title": ""
     },
@@ -269,7 +275,7 @@
       "image_count": 3,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 1922.000000020489,
+      "elapsed_ms": 1844.0000000409782,
       "folder": "2026-04-16_[技术] AI一键生成专业架构图：纯文本描述，无需设计技能",
       "title": ""
     },
@@ -281,7 +287,7 @@
       "image_count": 1,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 1562.000000034459,
+      "elapsed_ms": 1562.999999965541,
       "folder": "2026-04-18_[技术] 工具：微信收藏可视化分析神器wx-favorites-report",
       "title": ""
     },
@@ -293,7 +299,7 @@
       "image_count": 2,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 1780.9999999590218,
+      "elapsed_ms": 1702.999999979511,
       "folder": "2026-04-20_[技术] Claude Code架构揭秘：98.4%代码为基础设施，仅1.6%涉及AI决策",
       "title": ""
     },
@@ -305,7 +311,7 @@
       "image_count": 1,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 1672.000000020489,
+      "elapsed_ms": 1467.9999999934807,
       "folder": "2026-04-20_[技术] 图表设计库：13种编辑级图表+自动品牌配色",
       "title": ""
     },
@@ -317,7 +323,7 @@
       "image_count": 2,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 1765.999999945052,
+      "elapsed_ms": 1500.0,
       "folder": "2026-04-22_[技术] Google Stitch DESIGN.md：用纯文本统一 AI 设计风格一致性",
       "title": ""
     },
@@ -329,8 +335,20 @@
       "image_count": 3,
       "extra_files_count": 0,
       "error": "",
-      "elapsed_ms": 2203.000000095926,
+      "elapsed_ms": 2000.0,
       "folder": "2026-04-22_[技术] 寓言教学法：通过故事间接传递复杂概念",
+      "title": ""
+    },
+    {
+      "url": "https://arxiv.org/abs/2603.00195",
+      "adapter_type": "arxiv",
+      "status": "success",
+      "content_md_length": 2216,
+      "image_count": 0,
+      "extra_files_count": 0,
+      "error": "",
+      "elapsed_ms": 16891.000000061467,
+      "folder": "supplementary",
       "title": ""
     }
   ]
