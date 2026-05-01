@@ -2,10 +2,16 @@
 
 Auto-creates the config directory and a default config file on first access.
 If the YAML file is malformed or missing keys, sensible defaults are used.
+
+Environment variables ``WEB_CLIP_LLM_API_KEY``, ``WEB_CLIP_LLM_BASE_URL``,
+and ``WEB_CLIP_LLM_MODEL`` override the corresponding ``llm`` fields when
+set.  Each override is logged at info level so operators can diagnose why the
+effective config differs from the file content.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -13,7 +19,9 @@ from typing import Any
 
 import yaml
 
-__all__ = ["Config", "get_config"]
+logger = logging.getLogger(__name__)
+
+__all__ = ["Config", "PromptConfig", "get_config", "get_by_path", "set_by_path", "_mask_api_key"]
 
 _DEFAULT_CONFIG_DIR = Path.home() / ".web-clip-helper"
 _DEFAULT_CONFIG_PATH = _DEFAULT_CONFIG_DIR / "config.yaml"
@@ -36,6 +44,15 @@ class RefreshConfig:
 
 
 @dataclass
+class PromptConfig:
+    """Prompt template settings (placeholder consumed by S02+)."""
+
+    title: str = ""
+    tags: str = ""
+    classify: str = ""
+
+
+@dataclass
 class Config:
     """Root configuration object."""
 
@@ -43,6 +60,7 @@ class Config:
     db_path: str = str(_DEFAULT_CONFIG_DIR / "clips.db")
     llm: LLMConfig = field(default_factory=LLMConfig)
     refresh: RefreshConfig = field(default_factory=RefreshConfig)
+    prompts: PromptConfig = field(default_factory=PromptConfig)
 
     # ── Load / save ─────────────────────────────────────────────────
 
@@ -67,6 +85,8 @@ class Config:
                 pass
 
         config = cls._from_dict(raw)
+        # Environment variable overrides for LLM settings (take precedence over YAML)
+        _apply_env_overrides(config)
         # Ensure config dir + default file exist
         config._ensure_config_file(config_path)
         return config
@@ -76,6 +96,7 @@ class Config:
         """Construct a Config from a dict, applying defaults for missing keys."""
         llm_raw = raw.get("llm", {}) or {}
         refresh_raw = raw.get("refresh", {}) or {}
+        prompts_raw = raw.get("prompts", {}) or {}
         return cls(
             storage_path=raw.get("storage_path", str(_DEFAULT_CONFIG_DIR / "clips")),
             db_path=raw.get("db_path", str(_DEFAULT_CONFIG_DIR / "clips.db")),
@@ -86,6 +107,11 @@ class Config:
             ),
             refresh=RefreshConfig(
                 default_interval_days=refresh_raw.get("default_interval_days", 7),
+            ),
+            prompts=PromptConfig(
+                title=prompts_raw.get("title", ""),
+                tags=prompts_raw.get("tags", ""),
+                classify=prompts_raw.get("classify", ""),
             ),
         )
 
@@ -122,6 +148,11 @@ class Config:
             "refresh": {
                 "default_interval_days": self.refresh.default_interval_days,
             },
+            "prompts": {
+                "title": self.prompts.title,
+                "tags": self.prompts.tags,
+                "classify": self.prompts.classify,
+            },
         }
 
 
@@ -136,3 +167,107 @@ def get_config(path: Path | str | None = None) -> Config:
     if _cached_config is None:
         _cached_config = Config.load(path)
     return _cached_config
+
+
+# ── Environment variable overrides ──────────────────────────────────
+
+_ENV_OVERRIDES: dict[str, tuple[str, str]] = {
+    "WEB_CLIP_LLM_API_KEY": ("llm", "api_key"),
+    "WEB_CLIP_LLM_BASE_URL": ("llm", "base_url"),
+    "WEB_CLIP_LLM_MODEL": ("llm", "model"),
+}
+
+
+def _apply_env_overrides(config: Config) -> None:
+    """Override Config LLM fields from environment variables when set."""
+    for env_var, (section, field_name) in _ENV_OVERRIDES.items():
+        value = os.environ.get(env_var)
+        if value is not None:
+            setattr(getattr(config, section), field_name, value)
+            logger.info(
+                "Config override from env: %s → %s.%s",
+                env_var,
+                section,
+                field_name,
+            )
+
+
+# ── Dot-path helpers ────────────────────────────────────────────────
+
+
+def get_by_path(obj: Any, dotpath: str) -> Any:
+    """Retrieve a value from *obj* using a dot-separated path like ``llm.api_key``.
+
+    Raises :class:`KeyError` with a clear message if the path is invalid.
+    """
+    parts = dotpath.split(".")
+    current = obj
+    traversed: list[str] = []
+    for part in parts:
+        traversed.append(part)
+        if not hasattr(current, part):
+            raise KeyError(
+                f"Config path '{'.'.join(traversed)}' does not exist. "
+                f"Available fields: {[f.name for f in fields(current)]}"
+            )
+        current = getattr(current, part)
+    return current
+
+
+def set_by_path(obj: Any, dotpath: str, value: str) -> None:
+    """Set a value on *obj* using a dot-separated path, coercing type.
+
+    *value* is always a string (from CLI); it is coerced to the target
+    field's declared type (``str`` → ``str``, ``int`` → ``int``).
+
+    Raises :class:`KeyError` if the path is invalid.
+    """
+    parts = dotpath.split(".")
+    if len(parts) < 1:
+        raise KeyError("Empty dot-path")
+
+    # Navigate to parent
+    parent = obj
+    traversed: list[str] = []
+    for part in parts[:-1]:
+        traversed.append(part)
+        if not hasattr(parent, part):
+            raise KeyError(
+                f"Config path '{'.'.join(traversed)}' does not exist. "
+                f"Available fields: {[f.name for f in fields(parent)]}"
+            )
+        parent = getattr(parent, part)
+
+    leaf = parts[-1]
+    if not hasattr(parent, leaf):
+        raise KeyError(
+            f"Config path '{dotpath}' does not exist. "
+            f"Available fields: {[f.name for f in fields(parent)]}"
+        )
+
+    # Coerce value to the target field's type
+    target_field = next(f for f in fields(parent) if f.name == leaf)
+    expected_type = target_field.type
+    if expected_type is int or expected_type == "int":
+        coerced: Any = int(value)
+    else:
+        coerced = value
+
+    setattr(parent, leaf, coerced)
+
+
+# ── Masking utility ─────────────────────────────────────────────────
+
+
+def _mask_api_key(value: str) -> str:
+    """Mask an API key for safe display.
+
+    - Empty string → empty string
+    - ≤ 8 characters → ``****``
+    - Otherwise → first 3 chars + ``****`` + last 4 chars (e.g. ``sk-****1234``)
+    """
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "****"
+    return f"{value[:3]}****{value[-4:]}"
