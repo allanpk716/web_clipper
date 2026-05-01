@@ -33,7 +33,7 @@ _COMMAND_HELP = [
     {"name": "tags", "help": "List or manage tags"},
     {"name": "refresh", "help": "Refresh dynamic clipped items"},
     {"name": "feedback", "help": "Submit feedback on clipping quality"},
-    {"name": "config", "help": "Manage configuration"},
+    {"name": "config", "help": "Manage configuration (list/get/set + prompt test)"},
 ]
 
 
@@ -144,6 +144,113 @@ def config_set(
         jsonl_emit_error(stage="config", detail=f"Failed to set config: {exc}")
         raise typer.Exit(1)
 
+
+# ── config prompt sub-application ────────────────────────────────
+
+prompt_app = typer.Typer(
+    name="prompt",
+    add_completion=False,
+    invoke_without_command=True,
+    no_args_is_help=True,
+    help="Prompt template testing",
+)
+
+
+@prompt_app.command(name="test")
+def prompt_test(
+    type: str = typer.Option(..., "--type", "-t", help="Prompt type: title | tags | classify"),
+    url: str = typer.Option(..., "--url", "-u", help="URL to fetch content from"),
+    path: Optional[str] = typer.Option(None, "--path", "-p", help="Path to config file"),
+) -> None:
+    """Compare built-in and custom prompt results side-by-side."""
+    import sys as _sys
+
+    # Windows GBK encoding fix (MEM043/MEM047)
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+
+    if type not in ("title", "tags", "classify"):
+        print(f"错误: 不支持的类型 '{type}'，请使用 title, tags, 或 classify")
+        raise typer.Exit(1)
+
+    from web_clip_helper.config import Config
+    from web_clip_helper.llm import LLMClient
+
+    try:
+        config = Config.load(path)
+    except Exception as exc:
+        print(f"[加载配置失败: {exc}]")
+        raise typer.Exit(1)
+
+    # Check if custom prompt is set for the requested type
+    custom_template = getattr(config.prompts, type, "")
+    if not custom_template or not custom_template.strip():
+        print(f"未设置自定义提示词，请先用 config set prompts.{type} 设置")
+        raise typer.Exit(1)
+
+    # Route URL and fetch content via adapter
+    try:
+        from web_clip_helper.adapter import route_url
+        adapter_cls = route_url(url)
+        adapter = adapter_cls()
+        raw_content = adapter.fetch(url)
+    except ValueError as exc:
+        print(f"[URL 路由失败: {exc}]")
+        raise typer.Exit(1)
+    except Exception as exc:
+        print(f"[内容获取失败: {exc}]")
+        raise typer.Exit(1)
+
+    content_md = raw_content.content_md
+    source_type = raw_content.source_type
+
+    # Create two LLMClient instances: built-in (no prompts) and custom (with prompts)
+    from web_clip_helper.config import PromptConfig
+
+    built_in_client = LLMClient(config.llm)
+    custom_client = LLMClient(config.llm, prompts=config.prompts)
+
+    # Call the appropriate method on both clients
+    method_map = {
+        "title": "generate_title",
+        "tags": "extract_tags",
+        "classify": "classify_content",
+    }
+    method_name = method_map[type]
+
+    no_api_key = not config.llm.api_key or not config.llm.api_key.strip()
+
+    def _safe_call(client: LLMClient, label: str) -> str:
+        try:
+            if no_api_key:
+                return "[未配置 API Key]"
+            if type == "title":
+                result = getattr(client, method_name)(content_md, source_type, url=url)
+            else:
+                result = getattr(client, method_name)(content_md, source_type)
+            if isinstance(result, list):
+                return ", ".join(result) if result else "(空)"
+            return str(result) if result else "(空)"
+        except Exception as exc:
+            return f"[调用失败: {exc}]"
+
+    built_in_result = _safe_call(built_in_client, "内置")
+    custom_result = _safe_call(custom_client, "自定义")
+
+    # Print human-readable side-by-side comparison
+    separator = "─" * 40
+    print(f"提示词对比测试 — {type}")
+    print(f"URL: {url}")
+    print(separator)
+    print("【内置提示词结果】")
+    print(built_in_result)
+    print()
+    print("【自定义提示词结果】")
+    print(custom_result)
+    print(separator)
+
+
+# Register prompt sub-app on config_app
+config_app.add_typer(prompt_app, name="prompt", help="Prompt template testing")
 
 # Register config sub-app on main app
 app.add_typer(config_app, name="config", help="Manage configuration")

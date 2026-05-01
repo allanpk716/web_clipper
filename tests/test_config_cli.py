@@ -225,3 +225,211 @@ class TestConfigSet:
         """Setting an int field to a non-int value should error."""
         result = runner.invoke(app, ["config", "set", "refresh.default_interval_days", "not-a-number", "--path", str(config_file)])
         assert result.exit_code == 1, result.output
+
+
+# ── config prompt test ────────────────────────────────────────────
+
+
+class TestConfigPromptTest:
+    """Tests for ``config prompt test`` command."""
+
+    def _config_with_prompts(self, tmp_path: Path, api_key: str = "sk-test-key", prompts: dict | None = None) -> Path:
+        """Helper: create a config file with custom prompts."""
+        p = tmp_path / "config.yaml"
+        data = {
+            "llm": {
+                "api_key": api_key,
+                "base_url": "https://api.example.com/v1",
+                "model": "gpt-4",
+            },
+        }
+        if prompts:
+            data["prompts"] = prompts
+        _write_config(p, data)
+        return p
+
+    def test_prompt_test_with_custom_title(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Side-by-side output shows both built-in and custom results for title."""
+        cfg = self._config_with_prompts(tmp_path, prompts={"title": "Custom: {content}"})
+
+        # Mock the adapter fetch to return predictable content
+        from unittest.mock import MagicMock
+        from web_clip_helper import adapter as adapter_mod
+
+        mock_raw = MagicMock()
+        mock_raw.content_md = "Test article content about Python."
+        mock_raw.source_type = "web"
+        mock_adapter_cls = MagicMock(return_value=MagicMock(fetch=MagicMock(return_value=mock_raw)))
+        monkeypatch.setattr(adapter_mod, "route_url", lambda url: mock_adapter_cls)
+
+        # Mock LLMClient._chat to return different results based on prompt content
+        original_chat = None
+        call_count = {"n": 0}
+
+        def _mock_chat(self_llm, user_prompt: str):
+            call_count["n"] += 1
+            if "Custom:" in user_prompt:
+                return "Custom Title Result"
+            return "Built-in Title Result"
+
+        from web_clip_helper.llm import LLMClient
+        monkeypatch.setattr(LLMClient, "_chat", _mock_chat)
+
+        result = runner.invoke(app, [
+            "config", "prompt", "test",
+            "--type", "title",
+            "--url", "https://example.com",
+            "--path", str(cfg),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert "提示词对比测试 — title" in result.output
+        assert "URL: https://example.com" in result.output
+        assert "【内置提示词结果】" in result.output
+        assert "Built-in Title Result" in result.output
+        assert "【自定义提示词结果】" in result.output
+        assert "Custom Title Result" in result.output
+
+    def test_prompt_test_with_custom_tags(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Side-by-side output shows both built-in and custom results for tags."""
+        cfg = self._config_with_prompts(tmp_path, prompts={"tags": "Tag: {content}"})
+
+        from unittest.mock import MagicMock
+        from web_clip_helper import adapter as adapter_mod
+
+        mock_raw = MagicMock()
+        mock_raw.content_md = "Test content."
+        mock_raw.source_type = "web"
+        mock_adapter_cls = MagicMock(return_value=MagicMock(fetch=MagicMock(return_value=mock_raw)))
+        monkeypatch.setattr(adapter_mod, "route_url", lambda url: mock_adapter_cls)
+
+        from web_clip_helper.llm import LLMClient
+
+        def _mock_chat(self_llm, user_prompt: str):
+            if "Tag:" in user_prompt:
+                return '["custom-tag"]'
+            return '["built-in-tag"]'
+
+        monkeypatch.setattr(LLMClient, "_chat", _mock_chat)
+
+        result = runner.invoke(app, [
+            "config", "prompt", "test",
+            "--type", "tags",
+            "--url", "https://example.com",
+            "--path", str(cfg),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert "提示词对比测试 — tags" in result.output
+        assert "built-in-tag" in result.output
+        assert "custom-tag" in result.output
+
+    def test_prompt_test_with_custom_classify(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Side-by-side output shows both built-in and custom results for classify."""
+        cfg = self._config_with_prompts(tmp_path, prompts={"classify": "Classify: {content}"})
+
+        from unittest.mock import MagicMock
+        from web_clip_helper import adapter as adapter_mod
+
+        mock_raw = MagicMock()
+        mock_raw.content_md = "Test content."
+        mock_raw.source_type = "web"
+        mock_adapter_cls = MagicMock(return_value=MagicMock(fetch=MagicMock(return_value=mock_raw)))
+        monkeypatch.setattr(adapter_mod, "route_url", lambda url: mock_adapter_cls)
+
+        from web_clip_helper.llm import LLMClient
+
+        def _mock_chat(self_llm, user_prompt: str):
+            if "Classify:" in user_prompt:
+                return "自定义类别"
+            return "技术"
+
+        monkeypatch.setattr(LLMClient, "_chat", _mock_chat)
+
+        result = runner.invoke(app, [
+            "config", "prompt", "test",
+            "--type", "classify",
+            "--url", "https://example.com",
+            "--path", str(cfg),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert "提示词对比测试 — classify" in result.output
+        assert "技术" in result.output
+        assert "自定义类别" in result.output
+
+    def test_prompt_test_no_custom_prompt(self, tmp_path: Path) -> None:
+        """When custom prompt for the given type is empty, error message is shown."""
+        cfg = self._config_with_prompts(tmp_path, prompts={"tags": "some tags template"})
+
+        result = runner.invoke(app, [
+            "config", "prompt", "test",
+            "--type", "title",  # title has no custom prompt set
+            "--url", "https://example.com",
+            "--path", str(cfg),
+        ])
+
+        assert result.exit_code == 1, result.output
+        assert "未设置自定义提示词" in result.output
+        assert "prompts.title" in result.output
+
+    def test_prompt_test_no_api_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When api_key is empty, both sides show [未配置 API Key]."""
+        cfg = self._config_with_prompts(tmp_path, api_key="", prompts={"title": "Custom: {content}"})
+
+        from unittest.mock import MagicMock
+        from web_clip_helper import adapter as adapter_mod
+
+        mock_raw = MagicMock()
+        mock_raw.content_md = "Test content."
+        mock_raw.source_type = "web"
+        mock_adapter_cls = MagicMock(return_value=MagicMock(fetch=MagicMock(return_value=mock_raw)))
+        monkeypatch.setattr(adapter_mod, "route_url", lambda url: mock_adapter_cls)
+
+        result = runner.invoke(app, [
+            "config", "prompt", "test",
+            "--type", "title",
+            "--url", "https://example.com",
+            "--path", str(cfg),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert "[未配置 API Key]" in result.output
+
+    def test_prompt_test_invalid_type(self, tmp_path: Path) -> None:
+        """Error for unsupported --type value."""
+        cfg = self._config_with_prompts(tmp_path)
+
+        result = runner.invoke(app, [
+            "config", "prompt", "test",
+            "--type", "invalid",
+            "--url", "https://example.com",
+            "--path", str(cfg),
+        ])
+
+        assert result.exit_code == 1, result.output
+        assert "不支持的类型" in result.output
+
+    def test_prompt_test_url_fetch_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Adapter fetch error is handled gracefully."""
+        from unittest.mock import MagicMock
+
+        cfg = self._config_with_prompts(tmp_path, prompts={"title": "Custom: {content}"})
+
+        from web_clip_helper import adapter as adapter_mod
+        from web_clip_helper.adapter import AdapterError
+
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.fetch.side_effect = AdapterError("Connection refused")
+        mock_adapter_cls = MagicMock(return_value=mock_adapter_instance)
+        monkeypatch.setattr(adapter_mod, "route_url", lambda url: mock_adapter_cls)
+
+        result = runner.invoke(app, [
+            "config", "prompt", "test",
+            "--type", "title",
+            "--url", "https://example.com",
+            "--path", str(cfg),
+        ])
+
+        assert result.exit_code == 1, result.output
+        assert "内容获取失败" in result.output
