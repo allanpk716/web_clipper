@@ -15,7 +15,7 @@ from web_clip_helper.output import jsonl_emit_error, jsonl_emit_help, jsonl_emit
 # Trigger adapter auto-discovery registration
 import web_clip_helper.adapters._registry  # noqa: F401
 
-__all__ = ["app"]
+__all__ = ["app", "config_app"]
 
 app = typer.Typer(
     name="web-clip-helper",
@@ -33,6 +33,7 @@ _COMMAND_HELP = [
     {"name": "tags", "help": "List or manage tags"},
     {"name": "refresh", "help": "Refresh dynamic clipped items"},
     {"name": "feedback", "help": "Submit feedback on clipping quality"},
+    {"name": "config", "help": "Manage configuration"},
 ]
 
 
@@ -50,6 +51,102 @@ def main(
             description="LLM Agent-oriented web clipping CLI tool",
         )
         raise typer.Exit(0)
+
+
+# ── config sub-application ──────────────────────────────────────────
+
+config_app = typer.Typer(
+    name="config",
+    add_completion=False,
+    invoke_without_command=True,
+    no_args_is_help=True,
+    help="Manage configuration",
+)
+
+
+@config_app.callback()
+def config_main() -> None:
+    """Configuration management commands."""
+    pass
+
+
+@config_app.command(name="list")
+def config_list(
+    path: Optional[str] = typer.Option(None, "--path", "-p", help="Path to config file"),
+) -> None:
+    """List all configuration values (api_key is masked)."""
+    import web_clip_helper.config as cfg_mod
+
+    try:
+        config = cfg_mod.Config.load(path)
+        data = config._to_dict()
+        _emit_config_items(data, parent="")
+    except Exception as exc:
+        jsonl_emit_error(stage="config", detail=f"Failed to list config: {exc}")
+        raise typer.Exit(1)
+
+
+def _emit_config_items(data: dict, parent: str) -> None:
+    """Recursively emit config key=value pairs as JSONL result lines."""
+    for key, value in data.items():
+        full_key = f"{parent}.{key}" if parent else key
+        if isinstance(value, dict):
+            _emit_config_items(value, full_key)
+        else:
+            from web_clip_helper.config import _mask_api_key
+
+            display_value = _mask_api_key(str(value)) if full_key == "llm.api_key" else str(value)
+            jsonl_emit_result(stage="config", key=full_key, value=display_value)
+
+
+@config_app.command(name="get")
+def config_get(
+    key: str = typer.Argument(..., help="Config key in dot-path notation (e.g. llm.api_key)"),
+    path: Optional[str] = typer.Option(None, "--path", "-p", help="Path to config file"),
+) -> None:
+    """Get a single configuration value by dot-path key."""
+    from web_clip_helper.config import Config, _mask_api_key, get_by_path
+
+    try:
+        config = Config.load(path)
+        value = get_by_path(config, key)
+        display_value = _mask_api_key(str(value)) if key == "llm.api_key" else str(value)
+        jsonl_emit_result(stage="config", key=key, value=display_value)
+    except KeyError as exc:
+        jsonl_emit_error(stage="config", detail=str(exc))
+        raise typer.Exit(1)
+    except Exception as exc:
+        jsonl_emit_error(stage="config", detail=f"Failed to get config: {exc}")
+        raise typer.Exit(1)
+
+
+@config_app.command(name="set")
+def config_set(
+    key: str = typer.Argument(..., help="Config key in dot-path notation (e.g. llm.api_key)"),
+    value: str = typer.Argument(..., help="Value to set"),
+    path: Optional[str] = typer.Option(None, "--path", "-p", help="Path to config file"),
+) -> None:
+    """Set a configuration value by dot-path key and save to file."""
+    import web_clip_helper.config as cfg_mod
+
+    try:
+        config = cfg_mod.Config.load(path)
+        cfg_mod.set_by_path(config, key, value)
+        save_path = path or str(cfg_mod._DEFAULT_CONFIG_PATH)
+        config.save(save_path)
+        # Invalidate module-level cache so subsequent commands see the new value
+        cfg_mod._cached_config = None
+        jsonl_emit_result(stage="config", key=key, value=value, message="Config updated")
+    except KeyError as exc:
+        jsonl_emit_error(stage="config", detail=str(exc))
+        raise typer.Exit(1)
+    except Exception as exc:
+        jsonl_emit_error(stage="config", detail=f"Failed to set config: {exc}")
+        raise typer.Exit(1)
+
+
+# Register config sub-app on main app
+app.add_typer(config_app, name="config", help="Manage configuration")
 
 
 @app.command()
