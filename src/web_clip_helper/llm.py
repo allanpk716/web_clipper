@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from openai import OpenAI
 
-from web_clip_helper.config import LLMConfig
+from web_clip_helper.config import LLMConfig, PromptConfig
 
 __all__ = ["LLMClient"]
 
@@ -24,6 +24,19 @@ logger = logging.getLogger(__name__)
 
 # Maximum characters of content_md sent to the LLM (keeps token usage bounded).
 MAX_CONTENT_CHARS = 4000
+
+
+class _SafeDict(dict):
+    """Dict subclass that returns ``""`` for missing keys and logs a warning.
+
+    Used with :meth:`str.format_map` so that user-supplied prompt templates
+    containing unknown placeholder keys (e.g. ``{foo}``) render as an empty
+    string instead of raising :exc:`KeyError`.
+    """
+
+    def __missing__(self, key: str) -> str:  # type: ignore[override]
+        logger.warning("Prompt template contains unknown placeholder: {%s}", key)
+        return ""
 
 
 class LLMClient:
@@ -37,8 +50,9 @@ class LLMClient:
         immediately — no network call is attempted.
     """
 
-    def __init__(self, config: LLMConfig) -> None:
+    def __init__(self, config: LLMConfig, prompts: PromptConfig | None = None) -> None:
         self._config = config
+        self._prompts = prompts or PromptConfig()
         self._client: OpenAI | None = None
 
     # ------------------------------------------------------------------
@@ -59,12 +73,20 @@ class LLMClient:
         if not self._has_api_key:
             return self._title_fallback(content_md, url)
 
-        prompt = (
-            "请为以下内容生成一个简洁的标题，不超过50个字符。"
-            "只返回标题文字，不要加引号或其他格式。\n\n"
-            f"内容类型：{source_type}\n\n"
-            f"内容：\n{self._truncate(content_md)}"
+        template_vars = _SafeDict(
+            content_type=source_type,
+            content=self._truncate(content_md),
         )
+
+        if self._prompts.title:
+            prompt = self._prompts.title.format_map(template_vars)
+        else:
+            prompt = (
+                "请为以下内容生成一个简洁的标题，不超过50个字符。"
+                "只返回标题文字，不要加引号或其他格式。\n\n"
+                f"内容类型：{source_type}\n\n"
+                f"内容：\n{self._truncate(content_md)}"
+            )
 
         raw = self._chat(prompt)
         if raw:
@@ -86,13 +108,21 @@ class LLMClient:
         if not self._has_api_key:
             return []
 
-        prompt = (
-            "请从以下内容中提取3到8个相关标签。"
-            "以JSON数组格式返回，例如：[\"标签1\", \"标签2\"]。\n"
-            "只返回JSON数组，不要其他文字。\n\n"
-            f"内容类型：{source_type}\n\n"
-            f"内容：\n{self._truncate(content_md)}"
+        template_vars = _SafeDict(
+            content_type=source_type,
+            content=self._truncate(content_md),
         )
+
+        if self._prompts.tags:
+            prompt = self._prompts.tags.format_map(template_vars)
+        else:
+            prompt = (
+                "请从以下内容中提取3到8个相关标签。"
+                "以JSON数组格式返回，例如：[\"标签1\", \"标签2\"]。\n"
+                "只返回JSON数组，不要其他文字。\n\n"
+                f"内容类型：{source_type}\n\n"
+                f"内容：\n{self._truncate(content_md)}"
+            )
 
         raw = self._chat(prompt)
         if raw:
@@ -114,12 +144,20 @@ class LLMClient:
         if not self._has_api_key:
             return ""
 
-        prompt = (
-            "请将以下内容归类到一个类别，只返回类别名称，不要加引号或其他格式。\n"
-            "可选类别：技术、商业、文化、教育、娱乐、健康、科学、社会、生活、其他\n\n"
-            f"内容类型：{source_type}\n\n"
-            f"内容：\n{self._truncate(content_md)}"
+        template_vars = _SafeDict(
+            content_type=source_type,
+            content=self._truncate(content_md),
         )
+
+        if self._prompts.classify:
+            prompt = self._prompts.classify.format_map(template_vars)
+        else:
+            prompt = (
+                "请将以下内容归类到一个类别，只返回类别名称，不要加引号或其他格式。\n"
+                "可选类别：技术、商业、文化、教育、娱乐、健康、科学、社会、生活、其他\n\n"
+                f"内容类型：{source_type}\n\n"
+                f"内容：\n{self._truncate(content_md)}"
+            )
 
         raw = self._chat(prompt)
         if raw:

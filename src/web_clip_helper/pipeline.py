@@ -166,7 +166,7 @@ def _enrich_with_llm(
 
     jsonl_emit_progress(message="LLM enrichment starting", percent=35)
 
-    client = LLMClient(config.llm)
+    client = LLMClient(config.llm, prompts=config.prompts)
     try:
         title = client.generate_title(raw.content_md, raw.source_type, raw.url)
         tags = client.extract_tags(raw.content_md, raw.source_type)
