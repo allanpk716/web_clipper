@@ -367,6 +367,7 @@ def list_clips(
 @app.command(name="get")
 def get_clip(
     clip_id: int = typer.Argument(..., help="Clip ID to retrieve"),
+    content: bool = typer.Option(False, "--content", help="Include markdown body as 'content' field in the result"),
 ) -> None:
     """Get a single clipped item by ID. Output is JSONL."""
     idx = _get_index()
@@ -375,6 +376,21 @@ def get_clip(
         if record is None:
             jsonl_emit_error(stage="get", detail=f"Clip {clip_id} not found", error_code="NOT_FOUND")
             raise typer.Exit(1)
+
+        # If --content flag is set, read the markdown file and include it
+        if content:
+            md_path = record.get("markdown_path", "")
+            if md_path:
+                try:
+                    from pathlib import Path as _Path
+                    record["content"] = _Path(md_path).read_text(encoding="utf-8")
+                except FileNotFoundError:
+                    jsonl_emit_warning(message=f"Markdown file not found: {md_path}", stage="get")
+                except UnicodeDecodeError:
+                    jsonl_emit_warning(message=f"Markdown file has encoding issues: {md_path}", stage="get")
+                except OSError as exc:
+                    jsonl_emit_warning(message=f"Failed to read markdown file: {exc}", stage="get")
+
         jsonl_emit_result(stage="get", **record)
     except typer.Exit:
         raise
