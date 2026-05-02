@@ -40,6 +40,7 @@ _COMMAND_HELP = [
 
 @app.callback()
 def main(
+    ctx: typer.Context,
     help_flag: bool = typer.Option(False, "--help", "-h", is_flag=True, is_eager=True),
 ) -> None:
     """web-clip-helper — LLM Agent-oriented web clipping tool.
@@ -47,6 +48,14 @@ def main(
     All output (including --help) is JSONL so agents can parse it easily.
     """
     if help_flag:
+        jsonl_emit_help(
+            commands=_COMMAND_HELP,
+            description="LLM Agent-oriented web clipping CLI tool",
+        )
+        raise typer.Exit(0)
+
+    # No subcommand invoked → emit JSONL help and exit cleanly
+    if ctx.invoked_subcommand is None:
         jsonl_emit_help(
             commands=_COMMAND_HELP,
             description="LLM Agent-oriented web clipping CLI tool",
@@ -587,3 +596,7 @@ def refresh_clips() -> None:
         raise typer.Exit(1)
     finally:
         idx.close()
+
+
+if __name__ == "__main__":
+    app()
