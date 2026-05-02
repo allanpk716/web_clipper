@@ -81,6 +81,33 @@ web-clip-helper tags
 
 输出所有标签及其使用次数。
 
+### update — 更新剪藏属性
+
+```bash
+# 标记为动态内容，并设置 3 天刷新间隔
+web-clip-helper update 42 --dynamic --interval 3
+
+# 取消动态标记
+web-clip-helper update 7 --no-dynamic
+
+# 仅修改刷新间隔
+web-clip-helper update 15 --interval 14
+```
+
+更新剪藏的动态标记和刷新间隔。输出 JSONL 格式。
+
+选项：
+
+| 选项 | 缩写 | 说明 |
+|------|------|------|
+| `--dynamic` / `--no-dynamic` | — | 设置 `is_dynamic` 标记 |
+| `--interval` | `-i` | 刷新间隔天数（正整数） |
+
+**验证规则：**
+- 未指定任何选项 → 退出码 1
+- `--interval` ≤ 0 → 退出码 1
+- 不存在的 ID → 退出码 1
+
 ### refresh — 刷新动态剪藏
 
 ```bash
@@ -403,9 +430,49 @@ clip 完成后会输出一条汇总 warning：
 {"type": "warning", "message": "LLM 未配置：标题/标签/分类使用默认值。请运行 `web-clip-helper config set llm.api_key <key>` 或设置环境变量 WEB_CLIP_LLM_API_KEY。", "stage": "llm"}
 ```
 
-### 动态刷新（refresh）功能说明
+### 动态内容与刷新机制
 
-`refresh` 命令用于刷新标记为"动态"的剪藏内容。**当前版本中**，clip 操作不会自动将内容标记为动态（`is_dynamic=0`），因此 `refresh` 命令在默认情况下不会刷新任何剪藏。此功能为预留接口，未来版本可能添加 CLI 选项来标记动态内容。
+`refresh` 命令会重新剪藏所有到期的动态内容。哪些内容被标记为动态取决于适配器：
+
+| 适配器 | is_dynamic | 说明 |
+|--------|-----------|------|
+| 微博 | True | 微博正文会随编辑/删除变化 |
+| 微博头条 | True | 头条文章内容可能更新 |
+| 微博卡片 | True | 卡片内容可能更新 |
+| GitHub | False | 仓库内容虽会变化但刷新频率低，由用户按需标记 |
+| 微信公众号 | False | 文章发布后通常不再变化 |
+| arXiv | False | 论文发布后不会变化 |
+| 通用网页 | False | 默认不标记为动态 |
+
+- 适配器在 `clip` 时自动设置 `is_dynamic` 标记
+- 用户可通过 `update` 命令覆盖自动标记结果
+- 刷新间隔默认为 `refresh.default_interval_days`（默认 7 天）
+
+#### 示例 1：微博自动标记为动态
+
+```bash
+# 剪藏微博 — 自动标记为动态（is_dynamic=1）
+web-clip-helper clip https://weibo.com/12345/abc
+
+# 覆盖刷新间隔为 3 天
+web-clip-helper update 42 --interval 3
+
+# 稍后刷新所有到期的动态剪藏
+web-clip-helper refresh
+```
+
+#### 示例 2：手动将 GitHub 仓库标记为动态
+
+```bash
+# 剪藏 GitHub 仓库 — 不自动标记（is_dynamic=0）
+web-clip-helper clip https://github.com/user/repo
+
+# 手动标记为动态，每 14 天刷新一次
+web-clip-helper update 15 --dynamic --interval 14
+
+# 现在该仓库会每 14 天自动刷新
+web-clip-helper refresh
+```
 
 ### 剪藏文本内容
 
