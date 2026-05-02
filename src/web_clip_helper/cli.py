@@ -5,6 +5,7 @@ All user-facing output goes through ``output.jsonl_emit`` — no bare ``print()`
 
 from __future__ import annotations
 
+import json
 import sys
 from typing import Any, Optional
 
@@ -32,7 +33,7 @@ _COMMAND_HELP = [
     {"name": "search", "help": "Search clipped items by keyword"},
     {"name": "tags", "help": "List or manage tags"},
     {"name": "delete", "help": "Delete a clipped item by ID"},
-    {"name": "update", "help": "Update clip fields (dynamic flag, refresh interval)"},
+    {"name": "update", "help": "Update clip fields (title, tags, category, dynamic flag, refresh interval)"},
     {"name": "refresh", "help": "Refresh dynamic clipped items"},
     {"name": "feedback", "help": "Submit feedback on clipping quality"},
     {"name": "config", "help": "Manage configuration (list/get/set + prompt test)"},
@@ -505,15 +506,35 @@ def update_clip(
     clip_id: int = typer.Argument(..., help="Clip ID to update"),
     dynamic: Optional[bool] = typer.Option(None, "--dynamic/--no-dynamic", help="Set dynamic flag"),
     interval: Optional[int] = typer.Option(None, "--interval", "-i", help="Refresh interval in days"),
+    title: Optional[str] = typer.Option(None, "--title", help="New title for the clip"),
+    tags: Optional[str] = typer.Option(None, "--tags", help="New tags as JSON array string, e.g. '[\"tag1\",\"tag2\"]'"),
+    category: Optional[str] = typer.Option(None, "--category", help="New category for the clip"),
 ) -> None:
-    """Update clip fields (dynamic flag, refresh interval). Output is JSONL."""
-    if dynamic is None and interval is None:
-        jsonl_emit_error(stage="update", detail="At least one option (--dynamic/--no-dynamic or --interval) is required", error_code="INPUT_INVALID")
+    """Update clip fields (title, tags, category, dynamic flag, refresh interval). Output is JSONL."""
+    has_update = any(v is not None for v in [dynamic, interval, title, tags, category])
+    if not has_update:
+        jsonl_emit_error(stage="update", detail="At least one option (--title, --tags, --category, --dynamic/--no-dynamic, or --interval) is required", error_code="INPUT_INVALID")
         raise typer.Exit(1)
 
     if interval is not None and interval <= 0:
         jsonl_emit_error(stage="update", detail=f"Invalid interval: {interval}. Must be a positive integer", error_code="INPUT_INVALID")
         raise typer.Exit(1)
+
+    # Parse tags JSON array
+    parsed_tags: list[str] | None = None
+    if tags is not None:
+        try:
+            parsed_tags = json.loads(tags)
+            if not isinstance(parsed_tags, list):
+                jsonl_emit_error(stage="update", detail=f"Invalid tags: must be a JSON array, got {type(parsed_tags).__name__}", error_code="INPUT_INVALID")
+                raise typer.Exit(1)
+            for i, t in enumerate(parsed_tags):
+                if not isinstance(t, str):
+                    jsonl_emit_error(stage="update", detail=f"Invalid tags: element at index {i} is not a string ({type(t).__name__})", error_code="INPUT_INVALID")
+                    raise typer.Exit(1)
+        except json.JSONDecodeError as exc:
+            jsonl_emit_error(stage="update", detail=f"Invalid tags JSON: {exc}", error_code="INPUT_INVALID")
+            raise typer.Exit(1)
 
     idx = _get_index()
     try:
@@ -523,6 +544,12 @@ def update_clip(
             raise typer.Exit(1)
 
         updates: dict[str, Any] = {}
+        if title is not None:
+            updates["title"] = title
+        if parsed_tags is not None:
+            updates["tags"] = parsed_tags
+        if category is not None:
+            updates["category"] = category
         if dynamic is not None:
             updates["is_dynamic"] = 1 if dynamic else 0
         if interval is not None:
@@ -532,6 +559,12 @@ def update_clip(
 
         # Build result dict with updated field values
         result_data: dict[str, Any] = {"id": clip_id}
+        if title is not None:
+            result_data["title"] = title
+        if parsed_tags is not None:
+            result_data["tags"] = parsed_tags
+        if category is not None:
+            result_data["category"] = category
         if dynamic is not None:
             result_data["is_dynamic"] = 1 if dynamic else 0
         if interval is not None:
