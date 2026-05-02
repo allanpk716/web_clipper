@@ -28,6 +28,7 @@ from .output import (
     jsonl_emit_warning,
 )
 from .storage import StorageManager
+from .url_utils import normalize_url
 
 __all__ = ["clip_text", "clip_url"]
 
@@ -75,6 +76,44 @@ def clip_url(url: str, config: Config) -> ClipResult | None:
         Result on success, ``None`` on unrecoverable error.
     """
     jsonl_emit_progress(message=f"Starting clip for URL: {url}", percent=0)
+
+    # 0. Idempotent duplicate check — skip fetch if URL already clipped
+    try:
+        index = ClipIndex(config.db_path)
+        existing = index.find_by_url(url)
+        index.close()
+    except Exception:
+        # Duplicate check failure must not block clipping
+        existing = None
+
+    if existing is not None:
+        jsonl_emit_progress(
+            message="Duplicate URL detected",
+            percent=95,
+        )
+        result = ClipResult(
+            folder_path=Path(existing["folder_path"]),
+            markdown_path=Path(existing["markdown_path"]),
+            image_count=existing.get("image_count", 0),
+            record_id=existing["id"],
+        )
+        jsonl_emit_result(
+            stage="clip",
+            url=existing.get("url", ""),
+            title=existing.get("title", ""),
+            source_type=existing.get("source_type", ""),
+            folder=existing["folder_path"],
+            markdown=existing["markdown_path"],
+            image_count=existing.get("image_count", 0),
+            file_count=0,
+            record_id=existing["id"],
+            tags=existing.get("tags", []),
+            category=existing.get("category", ""),
+            duplicate=True,
+            existing_id=existing["id"],
+        )
+        jsonl_emit_progress(message="Clip complete (duplicate)", percent=100)
+        return result
 
     # 1. Route to adapter
     try:
