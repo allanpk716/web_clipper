@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from web_clip_helper.url_utils import normalize_url
+
 __all__ = ["ClipIndex"]
 
 _SCHEMA_SQL = """
@@ -93,6 +95,10 @@ class ClipIndex:
         tags = clip_data.get("tags", [])
         if isinstance(tags, list):
             clip_data["tags"] = json.dumps(tags)
+
+        # Normalize URL for consistent lookups (trailing slash + http→https)
+        if clip_data.get("url"):
+            clip_data["url"] = normalize_url(clip_data["url"])
 
         columns = [
             "url", "title", "source_type", "category", "tags",
@@ -233,6 +239,33 @@ class ClipIndex:
             end = start + limit if limit is not None else len(filtered)
             return filtered[start:end]
         return [self._row_to_dict(r) for r in rows]
+
+    def find_by_url(self, url: str) -> dict[str, Any] | None:
+        """Look up a clip by normalized URL.
+
+        Normalizes *url* (trailing-slash removal + http→https) and queries
+        the index for an exact match.  Returns the most recent matching
+        clip, or ``None`` if no record exists.
+
+        Parameters
+        ----------
+        url:
+            Raw URL to search for.
+
+        Returns
+        -------
+        dict | None
+            The matching clip record, or ``None``.
+        """
+        normalized = normalize_url(url)
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM clips WHERE url = ? ORDER BY id DESC LIMIT 1",
+            (normalized,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
 
     def search_clips(self, keyword: str) -> list[dict[str, Any]]:
         """Search clips by keyword in title and url (case-insensitive LIKE)."""
