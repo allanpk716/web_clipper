@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 import typer
 
-from web_clip_helper.output import jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result
+from web_clip_helper.output import jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning
 
 # Trigger adapter auto-discovery registration
 import web_clip_helper.adapters._registry  # noqa: F401
@@ -31,6 +31,7 @@ _COMMAND_HELP = [
     {"name": "get", "help": "Get a clipped item by ID"},
     {"name": "search", "help": "Search clipped items by keyword"},
     {"name": "tags", "help": "List or manage tags"},
+    {"name": "delete", "help": "Delete a clipped item by ID"},
     {"name": "update", "help": "Update clip fields (dynamic flag, refresh interval)"},
     {"name": "refresh", "help": "Refresh dynamic clipped items"},
     {"name": "feedback", "help": "Submit feedback on clipping quality"},
@@ -368,6 +369,48 @@ def search_clips(
             jsonl_emit_result(stage="search", **clip)
     except Exception as exc:
         jsonl_emit_error(stage="search", detail=f"Search failed: {exc}", error_code="INDEX_ERROR")
+        raise typer.Exit(1)
+    finally:
+        idx.close()
+
+
+@app.command(name="delete")
+def delete_clip(
+    clip_id: int = typer.Argument(..., help="Clip ID to delete"),
+) -> None:
+    """Delete a clipped item by ID. Removes record from DB and folder from disk."""
+    import shutil
+    from pathlib import Path
+
+    idx = _get_index()
+    try:
+        record = idx.get_clip(clip_id)
+        if record is None:
+            jsonl_emit_error(stage="delete", detail=f"Clip {clip_id} not found", error_code="NOT_FOUND")
+            raise typer.Exit(1)
+
+        folder_path = record.get("folder_path", "")
+
+        # Delete from SQLite
+        deleted = idx.delete_clip(clip_id)
+        if not deleted:
+            jsonl_emit_error(stage="delete", detail=f"Failed to delete clip {clip_id}", error_code="INDEX_ERROR")
+            raise typer.Exit(1)
+
+        # Clean up folder on disk (non-fatal if fails)
+        if folder_path:
+            folder = Path(folder_path)
+            if folder.exists():
+                try:
+                    shutil.rmtree(folder)
+                except Exception as exc:
+                    jsonl_emit_warning(message=f"Folder cleanup failed: {exc}", stage="delete")
+
+        jsonl_emit_result(stage="delete", id=clip_id, folder=folder_path, message="Clip deleted")
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        jsonl_emit_error(stage="delete", detail=f"Delete failed: {exc}", error_code="INTERNAL_ERROR")
         raise typer.Exit(1)
     finally:
         idx.close()
