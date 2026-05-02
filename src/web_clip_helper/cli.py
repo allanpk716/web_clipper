@@ -603,7 +603,9 @@ def update_clip(
 
 
 @app.command(name="refresh")
-def refresh_clips() -> None:
+def refresh_clips(
+    re_enrich: bool = typer.Option(False, "--re-enrich", help="Re-run LLM enrichment to regenerate tags/category"),
+) -> None:
     """Refresh dynamic clipped items that are due for re-clip. Output is JSONL."""
     from web_clip_helper.config import get_config
     from web_clip_helper.index import ClipIndex
@@ -618,7 +620,12 @@ def refresh_clips() -> None:
             jsonl_emit_result(stage="refresh", refreshed=0, failed=0, message="No clips due for refresh")
             return
 
-        jsonl_emit_progress(stage="refresh", message=f"Found {len(refreshable)} clips to refresh", count=len(refreshable))
+        jsonl_emit_progress(
+            stage="refresh",
+            message=f"Found {len(refreshable)} clips to refresh",
+            count=len(refreshable),
+            re_enrich=re_enrich,
+        )
 
         refreshed_count = 0
         failed_count = 0
@@ -626,10 +633,16 @@ def refresh_clips() -> None:
         for clip in refreshable:
             clip_id = clip["id"]
             url = clip.get("url", "")
+            # Preserve original metadata
+            original_tags = clip.get("tags", [])
+            original_category = clip.get("category", "")
+            original_title = clip.get("title", "")
+
             jsonl_emit_progress(
                 stage="refresh",
                 message=f"Refreshing clip #{clip_id}: {url}",
                 clip_id=clip_id,
+                re_enrich=re_enrich,
             )
 
             try:
@@ -657,13 +670,36 @@ def refresh_clips() -> None:
                                 import shutil
                                 shutil.rmtree(child, ignore_errors=True)
 
-                # Update the clip record with new paths
-                idx.update_clip(clip_id, {
+                # Build update dict — always preserve original title, tags, category
+                updates: dict[str, Any] = {
                     "folder_path": str(result.folder_path),
                     "markdown_path": str(result.markdown_path),
                     "image_count": result.image_count,
-                    "title": clip.get("title", ""),  # keep original title unless we want to update
-                })
+                    "title": original_title,
+                    "tags": original_tags,
+                    "category": original_category,
+                }
+
+                # When --re-enrich is set, run LLM on the new markdown content
+                if re_enrich:
+                    try:
+                        from pathlib import Path as _Path
+                        from web_clip_helper.llm import LLMClient
+
+                        new_md = _Path(result.markdown_path).read_text(encoding="utf-8")
+                        client = LLMClient(config.llm, prompts=config.prompts)
+                        new_tags = client.extract_tags(new_md, clip.get("source_type", "web"))
+                        new_category = client.classify_content(new_md, clip.get("source_type", "web"))
+                        updates["tags"] = new_tags
+                        updates["category"] = new_category
+                    except Exception as exc:
+                        jsonl_emit_warning(
+                            message=f"LLM re-enrichment failed for clip #{clip_id}: {exc}",
+                            stage="refresh",
+                        )
+                        # Keep original tags/category on failure
+
+                idx.update_clip(clip_id, updates)
 
                 # Mark as refreshed
                 idx.mark_refreshed(clip_id)
@@ -673,6 +709,7 @@ def refresh_clips() -> None:
                     stage="refresh",
                     message=f"Clip #{clip_id} refreshed successfully",
                     clip_id=clip_id,
+                    re_enrich=re_enrich,
                 )
 
             except Exception as exc:
@@ -689,6 +726,7 @@ def refresh_clips() -> None:
             refreshed=refreshed_count,
             failed=failed_count,
             message=f"Refresh complete: {refreshed_count} refreshed, {failed_count} failed",
+            re_enrich=re_enrich,
         )
 
     except Exception as exc:
