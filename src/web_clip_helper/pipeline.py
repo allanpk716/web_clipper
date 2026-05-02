@@ -284,6 +284,7 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
             "image_count": image_count,
             "tags": llm_tags,
             "category": llm_category,
+            "is_dynamic": 1 if raw.is_dynamic else 0,
         })
         index.close()
     except Exception as exc:
@@ -304,6 +305,7 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
     )
 
     jsonl_emit_result(
+        stage="clip",
         url=raw.url or "",
         title=title,
         source_type=raw.source_type,
@@ -315,6 +317,17 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
         tags=llm_tags,
         category=llm_category,
     )
+
+    # Emit a summary warning if LLM was skipped (no API key)
+    if not config.llm.api_key or not config.llm.api_key.strip():
+        jsonl_emit_warning(
+            message=(
+                "LLM 未配置：标题/标签/分类使用默认值。"
+                "请运行 `web-clip-helper config set llm.api_key <key>` "
+                "或设置环境变量 WEB_CLIP_LLM_API_KEY。"
+            ),
+            stage="llm",
+        )
 
     jsonl_emit_progress(message="Clip complete", percent=100)
 

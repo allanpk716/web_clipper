@@ -285,4 +285,5 @@ class WeiboCardAdapter:
             content_md=full_md,
             images=images,
             source_type=self.source_type,
+            is_dynamic=True,
         )

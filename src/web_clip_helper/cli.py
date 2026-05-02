@@ -259,7 +259,7 @@ app.add_typer(config_app, name="config", help="Manage configuration")
 @app.command()
 def clip(
     url: Optional[str] = typer.Argument(None, help="URL to clip"),
-    text: Optional[str] = typer.Argument(None, help="Raw text to clip"),
+    text: Optional[str] = typer.Option(None, "--text", "-t", help="Clip raw text instead of URL"),
 ) -> None:
     """Clip a URL or raw text into Markdown + storage."""
     if not url and not text:

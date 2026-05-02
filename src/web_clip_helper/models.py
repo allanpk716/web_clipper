@@ -17,6 +17,7 @@ class RawContent:
     images: list[str] = field(default_factory=list)
     extra_files: dict[str, bytes] = field(default_factory=dict)
     source_type: str = "generic"
+    is_dynamic: bool = False
     fetched_at: datetime = field(default_factory=datetime.now)
 
 

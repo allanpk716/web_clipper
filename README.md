@@ -231,22 +231,194 @@ web-clip-helper config set prompts.title "请为以下{content_type}内容生成
 | type | 说明 |
 |------|------|
 | `progress` | 进度消息，可选包含 `percent` |
-| `result` | 操作结果数据 |
+| `result` | 操作结果数据，包含 `stage` 字段标识来源命令 |
 | `error` | 错误信息，包含 `stage` 和 `detail` |
 | `warning` | 非致命警告 |
 | `help` | 帮助信息（`--help` 时输出） |
 
+### 退出码约定
+
+| 退出码 | 说明 |
+|--------|------|
+| `0` | 命令执行成功 |
+| `1` | 命令执行失败（查看 JSONL 中的 `error` 消息获取详情） |
+
 ## 支持的 URL 类型
 
-| 适配器 | 说明 |
-|--------|------|
-| GitHub | GitHub 仓库页面 |
-| 微博 | 微博正文 |
-| 微博头条 | 微博头条文章 |
-| 微博卡片 | 微博卡片内容 |
-| 微信公众号 | 微信公众号文章 |
-| arXiv | arXiv 论文页面 |
-| 通用网页 | 所有其他网页（默认回退） |
+| 适配器 | URL 格式 | 说明 |
+|--------|----------|------|
+| 微博头条 | `https://weibo.com/ttarticle/...`、`https://m.weibo.cn/ttarticle/...` | 微博头条文章（优先匹配） |
+| 微博卡片 | `https://card.weibo.com/article/...` | 微博卡片内容 |
+| 微博 | `https://weibo.com/...`、`https://m.weibo.cn/...` | 微博正文 |
+| 微信公众号 | `https://mp.weixin.qq.com/...` | 微信公众号文章 |
+| GitHub | `https://github.com/{owner}/{repo}` | GitHub 仓库页面 |
+| arXiv | `https://arxiv.org/abs/...`、`https://arxiv.org/pdf/...` | arXiv 论文页面 |
+| 通用网页 | 任何其他 URL | 默认回退适配器 |
+
+> **匹配规则：** URL 按适配器注册顺序匹配，第一个匹配的适配器被使用。微博头条和微博卡片优先于通用微博适配器。
+
+## For AI Agents
+
+本节为 AI agent 提供集成所需的完整信息。
+
+### 快速集成流程
+
+```bash
+# 1. 剪藏一个 URL
+web-clip-helper clip https://example.com/article
+# 解析最后一行 type=result 的 JSON，获取 record_id、title、tags 等
+
+# 2. 搜索已有剪藏
+web-clip-helper search "关键词"
+# 每行 type=result 的 JSON 包含匹配的剪藏记录
+
+# 3. 查看特定剪藏
+web-clip-helper get <record_id>
+```
+
+### 逐行解析 JSONL 输出
+
+所有命令输出多行 JSONL。一个 `clip` 操作的典型输出：
+
+```jsonl
+{"type": "progress", "message": "Starting clip for URL: https://...", "percent": 0}
+{"type": "progress", "message": "Using adapter: GenericWebAdapter", "percent": 10}
+{"type": "progress", "message": "Fetched content: 文章标题", "percent": 30}
+{"type": "progress", "message": "LLM enrichment starting", "percent": 35}
+{"type": "progress", "message": "LLM enrichment complete", "percent": 45}
+{"type": "progress", "message": "Created storage entry: 2026-05-01_文章标题", "percent": 40}
+{"type": "progress", "message": "Downloaded 3 images", "percent": 70}
+{"type": "progress", "message": "Saved markdown: 2026-05-01_文章标题.md", "percent": 85}
+{"type": "progress", "message": "Saved to index: record #42", "percent": 95}
+{"type": "result", "stage": "clip", "url": "https://...", "title": "文章标题", "source_type": "web", "folder": "/path/to/clips/2026-05-01_文章标题", "markdown": "/path/to/markdown.md", "image_count": 3, "file_count": 0, "record_id": 42, "tags": ["标签1", "标签2"], "category": "技术"}
+{"type": "progress", "message": "Clip complete", "percent": 100}
+```
+
+**Agent 应该：** 逐行解析 JSONL，收集所有 `type=result` 的行。使用 `stage` 字段区分来自不同命令的结果。
+
+### 各命令的 result schema
+
+#### clip result
+
+```json
+{
+  "type": "result",
+  "stage": "clip",
+  "url": "https://...",
+  "title": "文章标题",
+  "source_type": "web",
+  "folder": "/path/to/clip/folder",
+  "markdown": "/path/to/file.md",
+  "image_count": 3,
+  "file_count": 0,
+  "record_id": 42,
+  "tags": ["标签1", "标签2"],
+  "category": "技术"
+}
+```
+
+#### list / search result
+
+```json
+{
+  "type": "result",
+  "stage": "list",
+  "id": 42,
+  "url": "https://...",
+  "title": "文章标题",
+  "source_type": "web",
+  "category": "技术",
+  "tags": ["标签1"],
+  "folder_path": "/path/to/folder",
+  "markdown_path": "/path/to/file.md",
+  "image_count": 3,
+  "is_dynamic": 0,
+  "refresh_interval_days": 7,
+  "last_refreshed_at": null,
+  "created_at": "2026-05-01T10:00:00",
+  "updated_at": "2026-05-01T10:00:00"
+}
+```
+
+#### get result
+
+与 list result 相同的字段结构，`stage` 为 `"get"`。
+
+#### tags result
+
+```json
+{
+  "type": "result",
+  "stage": "tags",
+  "tag": "python",
+  "count": 15
+}
+```
+
+#### config result
+
+```json
+{
+  "type": "result",
+  "stage": "config",
+  "key": "llm.api_key",
+  "value": "sk-****1234"
+}
+```
+
+#### feedback result
+
+```json
+{
+  "type": "result",
+  "stage": "feedback",
+  "file": "/path/to/feedback.md",
+  "feedback_type": "bug",
+  "message": "Feedback file generated: /path/to/feedback.md"
+}
+```
+
+### 常见错误及排查
+
+| 错误 stage | 典型 detail | 原因 | 解决方式 |
+|-----------|-------------|------|---------|
+| `routing` | `Invalid URL: ...` | URL 为空或格式无效 | 检查 URL 参数 |
+| `fetch` | `HTTP 404` / `Timeout` | 目标网站不可达 | 重试或检查 URL 是否正确 |
+| `fetch` | `AdapterError: ...` | 适配器解析失败 | 可能是页面结构变化，提交 feedback |
+| `storage` | `Cannot write...` | 磁盘空间不足或权限问题 | 检查 storage_path 配置 |
+| `index` | `database is locked` | SQLite 并发写入冲突 | 确保不并发调用 clip |
+| `llm` (warning) | `LLM enrichment skipped: no API key` | 未配置 API key | 运行 `config set llm.api_key <key>` |
+
+### LLM 未配置时的行为
+
+如果未配置 API key，`clip` 命令仍然可以正常工作（退出码 0），但：
+
+- **标题**：使用 URL 域名 + 时间戳，或内容前 50 个字符
+- **标签**：返回空数组 `[]`
+- **分类**：返回空字符串
+
+clip 完成后会输出一条汇总 warning：
+
+```jsonl
+{"type": "warning", "message": "LLM 未配置：标题/标签/分类使用默认值。请运行 `web-clip-helper config set llm.api_key <key>` 或设置环境变量 WEB_CLIP_LLM_API_KEY。", "stage": "llm"}
+```
+
+### 动态刷新（refresh）功能说明
+
+`refresh` 命令用于刷新标记为"动态"的剪藏内容。**当前版本中**，clip 操作不会自动将内容标记为动态（`is_dynamic=0`），因此 `refresh` 命令在默认情况下不会刷新任何剪藏。此功能为预留接口，未来版本可能添加 CLI 选项来标记动态内容。
+
+### 剪藏文本内容
+
+使用 `--text` 选项剪藏纯文本（注意不是位置参数）：
+
+```bash
+# 正确
+web-clip-helper clip --text "要剪藏的文本内容"
+web-clip-helper clip -t "短选项形式"
+
+# 错误 — 这会把文本当作 URL 处理
+web-clip-helper clip "要剪藏的文本内容"
+```
 
 ## 开发
 
