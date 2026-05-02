@@ -49,6 +49,9 @@ web-clip-helper list --category article
 
 # 按来源类型筛选
 web-clip-helper list --source-type github
+
+# 分页查询
+web-clip-helper list --limit 10 --offset 0
 ```
 
 选项：
@@ -58,12 +61,36 @@ web-clip-helper list --source-type github
 | `--tag` | `-t` | 按标签筛选 |
 | `--category` | `-c` | 按分类筛选 |
 | `--source-type` | `-s` | 按来源类型筛选 |
+| `--limit` | `-n` | 返回结果数量上限（正整数） |
+| `--offset` | — | 跳过的结果数量（非负整数） |
+
+JSONL progress 输出包含 `total_count`（匹配总数）和 `returned_count`（实际返回数）：
+
+```jsonl
+{"type": "progress", "stage": "list", "message": "Query completed", "total_count": 50, "returned_count": 10}
+```
 
 ### get — 获取单条剪藏
 
 ```bash
 web-clip-helper get <clip-id>
 ```
+
+### delete — 删除剪藏
+
+```bash
+web-clip-helper delete <clip-id>
+```
+
+删除指定剪藏。同时删除 SQLite 记录和磁盘上的文件夹（文件夹清理失败为非致命警告，不影响删除结果）。
+
+JSONL 结果：
+
+```json
+{"type": "result", "stage": "delete", "id": 42, "folder": "/path/to/folder", "message": "Clip deleted"}
+```
+
+错误码：`NOT_FOUND`（ID 不存在）、`INDEX_ERROR`（数据库删除失败）、`INTERNAL_ERROR`（意外错误）
 
 ### search — 关键词搜索
 
@@ -72,6 +99,23 @@ web-clip-helper search <query>
 ```
 
 在标题和 URL 中搜索包含关键词的剪藏。
+
+选项：
+
+| 选项 | 说明 |
+|------|------|
+| `--full` | 启用全文搜索（在 Markdown 内容中搜索，而不仅限于标题和 URL） |
+
+**搜索模式：**
+
+- 默认模式（metadata）：在标题和 URL 中搜索，速度快
+- `--full` 模式（fulltext）：两阶段搜索，第一阶段匹配标题/URL，第二阶段读取 Markdown 文件内容进行全文匹配
+
+JSONL progress 输出包含 `mode` 字段（`"metadata"` 或 `"fulltext"`）：
+
+```jsonl
+{"type": "progress", "stage": "search", "message": "Search completed", "count": 5, "mode": "fulltext"}
+```
 
 ### tags — 列出所有标签
 
@@ -92,43 +136,95 @@ web-clip-helper update 7 --no-dynamic
 
 # 仅修改刷新间隔
 web-clip-helper update 15 --interval 14
+
+# 修改标题
+web-clip-helper update 42 --title "新标题"
+
+# 修改标签（JSON 数组字符串格式）
+web-clip-helper update 42 --tags '["python","web"]'
+
+# 修改分类
+web-clip-helper update 42 --category "技术文章"
 ```
 
-更新剪藏的动态标记和刷新间隔。输出 JSONL 格式。
+更新剪藏的标题、标签、分类、动态标记和刷新间隔。输出 JSONL 格式。
 
 选项：
 
 | 选项 | 缩写 | 说明 |
 |------|------|------|
+| `--title` | — | 新标题 |
+| `--tags` | — | 新标签，JSON 数组字符串格式（如 `'["tag1","tag2"]'`） |
+| `--category` | — | 新分类 |
 | `--dynamic` / `--no-dynamic` | — | 设置 `is_dynamic` 标记 |
 | `--interval` | `-i` | 刷新间隔天数（正整数） |
 
 **验证规则：**
 - 未指定任何选项 → 退出码 1
 - `--interval` ≤ 0 → 退出码 1
+- `--tags` 不是合法 JSON 数组 → 退出码 1
 - 不存在的 ID → 退出码 1
 
 ### refresh — 刷新动态剪藏
 
 ```bash
+# 刷新所有到期的动态剪藏（保留原始标题/标签/分类）
 web-clip-helper refresh
+
+# 刷新并重新调用 LLM 生成标签和分类
+web-clip-helper refresh --re-enrich
 ```
 
 重新剪藏到期的动态内容（根据 `refresh.default_interval_days` 配置的间隔判断）。
+
+选项：
+
+| 选项 | 说明 |
+|------|------|
+| `--re-enrich` | 重新调用 LLM 生成标签和分类 |
+
+**行为说明：**
+- 默认：刷新内容但保留原始标题、标签和分类
+- `--re-enrich`：标题始终保留，标签和分类通过 LLM 重新生成
+- LLM 失败为非致命错误，失败时回退到原始标签/分类
+- JSONL 输出包含 `re_enrich` 布尔字段
 
 ### feedback — 提交反馈
 
 ```bash
 web-clip-helper feedback "问题描述" --type bug
+
+# 附加文件（如 JSONL 日志）
+web-clip-helper feedback "搜索结果不正确" --type bug --attach /path/to/log.jsonl
 ```
 
-在 `~/.web-clip-helper/feedback/` 目录下生成包含环境信息的反馈文件。
+在 `~/.web-clip-helper/feedback/` 目录下生成包含环境信息的反馈文件。附加文件会嵌入到反馈 Markdown 的代码块中。
 
 选项：
 
 | 选项 | 说明 |
 |------|------|
 | `--type` | 反馈类型：`bug`（默认）、`feature`、`other` |
+| `--attach` | 附加文件路径（文件内容嵌入反馈报告） |
+
+**附加文件规则：**
+- 文件内容以代码块形式嵌入反馈 Markdown
+- 超过 100KB 的文件会被截断并附带提示
+- 文件不存在时报 `INPUT_INVALID` 错误
+
+### version — 查看版本
+
+```bash
+web-clip-helper version
+```
+
+输出当前版本号。
+
+JSONL 输出：
+
+```json
+{"type": "result", "stage": "version", "version": "0.1.0"}
+```
 
 ## 配置管理
 
@@ -288,6 +384,50 @@ web-clip-helper config set prompts.title "请为以下{content_type}内容生成
 
 本节为 AI agent 提供集成所需的完整信息。
 
+### 错误码参考
+
+所有 JSONL 错误行（`type: "error"`）都包含 `error_code` 字段，提供机器可读的错误标识：
+
+| error_code | 说明 |
+|-----------|------|
+| `INPUT_INVALID` | 输入参数无效或缺失 |
+| `NOT_FOUND` | 请求的资源（剪藏、配置项）不存在 |
+| `STORAGE_ERROR` | 文件系统存储操作失败 |
+| `INDEX_ERROR` | SQLite 索引操作失败 |
+| `NETWORK_ERROR` | 网络连接或 DNS 失败 |
+| `ROUTING_ERROR` | URL 无法路由到适配器 |
+| `FETCH_ERROR` | 适配器获取 URL 内容失败 |
+| `CONFIG_ERROR` | 配置加载/保存/验证错误 |
+| `INTERNAL_ERROR` | 意外内部错误（可能是 bug） |
+| `REFRESH_ERROR` | 动态剪藏刷新失败 |
+
+### Agent 错误处理最佳实践
+
+Agent 应根据 `error_code` 进行条件分支处理：
+
+```python
+# 示例：基于 error_code 的条件分支
+if error_code == "NETWORK_ERROR":
+    # 网络问题，可以重试
+    retry_after(seconds=30)
+elif error_code == "NOT_FOUND":
+    # 资源不存在，跳过即可
+    log.info("Clip not found, skipping")
+elif error_code == "INTERNAL_ERROR":
+    # 内部错误，需要人工介入
+    alert_user(f"Unexpected error: {detail}")
+elif error_code == "INPUT_INVALID":
+    # 输入有误，修正后重试
+    fix_input_and_retry()
+```
+
+**建议：**
+- `NETWORK_ERROR`：可重试，建议指数退避
+- `NOT_FOUND`：跳过即可，不是真正的错误
+- `INTERNAL_ERROR`：需要人工关注，可能需要提交 feedback
+- `INPUT_INVALID`：修正输入参数后重试
+- `STORAGE_ERROR` / `INDEX_ERROR`：检查磁盘空间和文件权限
+
 ### 快速集成流程
 
 ```bash
@@ -367,6 +507,18 @@ web-clip-helper get <record_id>
 }
 ```
 
+list 命令的 progress 行包含分页信息：
+
+```json
+{"type": "progress", "stage": "list", "message": "Query completed", "total_count": 50, "returned_count": 10}
+```
+
+search 命令的 progress 行包含搜索模式：
+
+```json
+{"type": "progress", "stage": "search", "message": "Search completed", "count": 5, "mode": "metadata"}
+```
+
 #### get result
 
 与 list result 相同的字段结构，`stage` 为 `"get"`。
@@ -390,6 +542,45 @@ web-clip-helper get <record_id>
   "stage": "config",
   "key": "llm.api_key",
   "value": "sk-****1234"
+}
+```
+
+#### update result
+
+```json
+{
+  "type": "result",
+  "stage": "update",
+  "id": 42,
+  "title": "新标题",
+  "tags": ["tag1", "tag2"],
+  "category": "新分类",
+  "is_dynamic": 1,
+  "refresh_interval_days": 7
+}
+```
+
+仅包含本次实际更新的字段。
+
+#### delete result
+
+```json
+{
+  "type": "result",
+  "stage": "delete",
+  "id": 42,
+  "folder": "/path/to/folder",
+  "message": "Clip deleted"
+}
+```
+
+#### version result
+
+```json
+{
+  "type": "result",
+  "stage": "version",
+  "version": "0.1.0"
 }
 ```
 
