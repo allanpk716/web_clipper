@@ -16,9 +16,25 @@ __all__ = [
     "jsonl_emit_result",
     "jsonl_emit_warning",
     "jsonl_emit_help",
+    "set_quiet",
 ]
 
 _VALID_TYPES = {"progress", "result", "error", "warning", "help"}
+
+# Module-level quiet-mode flag — when True, progress and warning messages
+# are silently dropped so only result, error, and help lines are emitted.
+_quiet_mode: bool = False
+
+
+def set_quiet(mode: bool) -> None:
+    """Enable or disable quiet mode.
+
+    When quiet mode is on, ``jsonl_emit`` silently drops ``progress`` and
+    ``warning`` type messages.  ``result``, ``error``, and ``help`` types
+    are always emitted regardless of this setting.
+    """
+    global _quiet_mode
+    _quiet_mode = mode
 
 
 def jsonl_emit(type: str, **kwargs: object) -> None:  # noqa: A002
@@ -31,6 +47,10 @@ def jsonl_emit(type: str, **kwargs: object) -> None:  # noqa: A002
     **kwargs:
         Arbitrary extra fields merged into the JSON object.
     """
+    # Quiet mode: suppress progress and warning, keep result/error/help
+    if _quiet_mode and type in ("progress", "warning"):
+        return
+
     if type not in _VALID_TYPES:
         raise ValueError(f"Invalid JSONL type: {type!r}. Must be one of {_VALID_TYPES}")
     payload = {"type": type, **kwargs}

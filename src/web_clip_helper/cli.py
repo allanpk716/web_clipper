@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 import typer
 
-from web_clip_helper.output import jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning
+from web_clip_helper.output import jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning, set_quiet
 
 # Trigger adapter auto-discovery registration
 import web_clip_helper.adapters._registry  # noqa: F401
@@ -44,12 +44,16 @@ _COMMAND_HELP = [
 @app.callback()
 def main(
     ctx: typer.Context,
+    quiet: bool = typer.Option(False, "--quiet", "-q", is_eager=True, help="Suppress progress and warning output; only emit result and error lines"),
     help_flag: bool = typer.Option(False, "--help", "-h", is_flag=True, is_eager=True),
 ) -> None:
     """web-clip-helper — LLM Agent-oriented web clipping tool.
 
     All output (including --help) is JSONL so agents can parse it easily.
     """
+    if quiet:
+        set_quiet(True)
+
     if help_flag:
         jsonl_emit_help(
             commands=_COMMAND_HELP,
