@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://web-clip-helper.dev/schemas/error.schema.json",
+  "title": "ErrorOutput",
+  "description": "JSONL error output (type=error). Emitted by any command on failure.",
+  "type": "object",
+  "required": ["type", "stage", "detail"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "error",
+      "description": "JSONL message type."
+    },
+    "stage": {
+      "type": "string",
+      "description": "Command stage that produced the error (e.g. clip, get, list, search, config)."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Human-readable error description."
+    },
+    "error_code": {
+      "type": "string",
+      "enum": [
+        "INPUT_INVALID",
+        "NOT_FOUND",
+        "STORAGE_ERROR",
+        "INDEX_ERROR",
+        "NETWORK_ERROR",
+        "ROUTING_ERROR",
+        "FETCH_ERROR",
+        "CONFIG_ERROR",
+        "INTERNAL_ERROR",
+        "REFRESH_ERROR",
+        "TIMEOUT_ERROR"
+      ],
+      "description": "Machine-readable error code for programmatic branching. See ErrorCode class for descriptions."
+    }
+  },
+  "additionalProperties": true
+}

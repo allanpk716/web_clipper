@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://web-clip-helper.dev/schemas/clip-result.schema.json",
+  "title": "ClipResult",
+  "description": "JSONL result output for the `clip` command (type=result, stage=clip).",
+  "type": "object",
+  "required": ["type", "stage", "url", "title", "source_type", "folder", "markdown", "image_count", "file_count", "record_id", "tags", "category"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "result",
+      "description": "JSONL message type."
+    },
+    "stage": {
+      "type": "string",
+      "const": "clip",
+      "description": "Command stage identifier."
+    },
+    "url": {
+      "type": "string",
+      "description": "Original clipped URL (empty string for --text clips)."
+    },
+    "title": {
+      "type": "string",
+      "description": "LLM-generated or fallback title."
+    },
+    "source_type": {
+      "type": "string",
+      "description": "Adapter source type (e.g. web, github, weibo)."
+    },
+    "folder": {
+      "type": "string",
+      "description": "Absolute path to the clip storage folder."
+    },
+    "markdown": {
+      "type": "string",
+      "description": "Absolute path to the saved Markdown file."
+    },
+    "image_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of downloaded images."
+    },
+    "file_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of additional files (non-image attachments)."
+    },
+    "record_id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "SQLite record ID."
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "LLM-extracted tags (empty array if LLM is not configured)."
+    },
+    "category": {
+      "type": "string",
+      "description": "LLM-generated category (empty string if LLM is not configured)."
+    },
+    "duplicate": {
+      "type": "boolean",
+      "description": "Present and true when the URL was already clipped."
+    },
+    "existing_id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "When duplicate=true, the existing clip's record ID."
+    }
+  },
+  "additionalProperties": false
+}

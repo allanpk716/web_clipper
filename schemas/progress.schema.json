@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://web-clip-helper.dev/schemas/progress.schema.json",
+  "title": "ProgressOutput",
+  "description": "JSONL progress output (type=progress). Emitted during long-running operations. Suppressed in --quiet mode.",
+  "type": "object",
+  "required": ["type", "message"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "progress",
+      "description": "JSONL message type."
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable progress description."
+    },
+    "percent": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Optional progress percentage (0-100)."
+    },
+    "stage": {
+      "type": "string",
+      "description": "Command stage (e.g. clip, list, search, refresh)."
+    },
+    "total_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total matching records (list command)."
+    },
+    "returned_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of records returned in this page (list command)."
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Result count (search/tags commands)."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["metadata", "fulltext"],
+      "description": "Search mode (search command only)."
+    },
+    "clip_id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Clip record ID being processed (refresh command)."
+    },
+    "re_enrich": {
+      "type": "boolean",
+      "description": "Whether LLM re-enrichment is active (refresh command)."
+    }
+  },
+  "additionalProperties": true
+}
