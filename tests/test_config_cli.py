@@ -231,7 +231,13 @@ class TestConfigSet:
 
 
 class TestConfigPromptTest:
-    """Tests for ``config prompt test`` command."""
+    """Tests for ``config prompt test`` command — JSONL output."""
+
+    def _parse_jsonl(self, output: str) -> list[dict]:
+        """Parse JSONL output, stripping ANSI codes."""
+        import re
+        clean = re.sub(r'\x1b\[[0-9;]*m', '', output)
+        return [json.loads(line) for line in clean.strip().splitlines() if line.strip()]
 
     def _config_with_prompts(self, tmp_path: Path, api_key: str = "sk-test-key", prompts: dict | None = None) -> Path:
         """Helper: create a config file with custom prompts."""
@@ -249,10 +255,9 @@ class TestConfigPromptTest:
         return p
 
     def test_prompt_test_with_custom_title(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Side-by-side output shows both built-in and custom results for title."""
+        """JSONL result shows both built-in and custom results for title."""
         cfg = self._config_with_prompts(tmp_path, prompts={"title": "Custom: {content}"})
 
-        # Mock the adapter fetch to return predictable content
         from unittest.mock import MagicMock
         from web_clip_helper import adapter as adapter_mod
 
@@ -262,17 +267,13 @@ class TestConfigPromptTest:
         mock_adapter_cls = MagicMock(return_value=MagicMock(fetch=MagicMock(return_value=mock_raw)))
         monkeypatch.setattr(adapter_mod, "route_url", lambda url: mock_adapter_cls)
 
-        # Mock LLMClient._chat to return different results based on prompt content
-        original_chat = None
-        call_count = {"n": 0}
+        from web_clip_helper.llm import LLMClient
 
         def _mock_chat(self_llm, user_prompt: str):
-            call_count["n"] += 1
             if "Custom:" in user_prompt:
                 return "Custom Title Result"
             return "Built-in Title Result"
 
-        from web_clip_helper.llm import LLMClient
         monkeypatch.setattr(LLMClient, "_chat", _mock_chat)
 
         result = runner.invoke(app, [
@@ -283,15 +284,17 @@ class TestConfigPromptTest:
         ])
 
         assert result.exit_code == 0, result.output
-        assert "提示词对比测试 — title" in result.output
-        assert "URL: https://example.com" in result.output
-        assert "【内置提示词结果】" in result.output
-        assert "Built-in Title Result" in result.output
-        assert "【自定义提示词结果】" in result.output
-        assert "Custom Title Result" in result.output
+        lines = self._parse_jsonl(result.output)
+        result_lines = [l for l in lines if l.get("type") == "result"]
+        assert len(result_lines) == 1
+        r = result_lines[0]
+        assert r["prompt_type"] == "title"
+        assert r["url"] == "https://example.com"
+        assert r["built_in"] == "Built-in Title Result"
+        assert r["custom"] == "Custom Title Result"
 
     def test_prompt_test_with_custom_tags(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Side-by-side output shows both built-in and custom results for tags."""
+        """JSONL result shows both built-in and custom results for tags."""
         cfg = self._config_with_prompts(tmp_path, prompts={"tags": "Tag: {content}"})
 
         from unittest.mock import MagicMock
@@ -320,12 +323,16 @@ class TestConfigPromptTest:
         ])
 
         assert result.exit_code == 0, result.output
-        assert "提示词对比测试 — tags" in result.output
-        assert "built-in-tag" in result.output
-        assert "custom-tag" in result.output
+        lines = self._parse_jsonl(result.output)
+        result_lines = [l for l in lines if l.get("type") == "result"]
+        assert len(result_lines) == 1
+        r = result_lines[0]
+        assert r["prompt_type"] == "tags"
+        assert "built-in-tag" in r["built_in"]
+        assert "custom-tag" in r["custom"]
 
     def test_prompt_test_with_custom_classify(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Side-by-side output shows both built-in and custom results for classify."""
+        """JSONL result shows both built-in and custom results for classify."""
         cfg = self._config_with_prompts(tmp_path, prompts={"classify": "Classify: {content}"})
 
         from unittest.mock import MagicMock
@@ -354,12 +361,16 @@ class TestConfigPromptTest:
         ])
 
         assert result.exit_code == 0, result.output
-        assert "提示词对比测试 — classify" in result.output
-        assert "技术" in result.output
-        assert "自定义类别" in result.output
+        lines = self._parse_jsonl(result.output)
+        result_lines = [l for l in lines if l.get("type") == "result"]
+        assert len(result_lines) == 1
+        r = result_lines[0]
+        assert r["prompt_type"] == "classify"
+        assert r["built_in"] == "技术"
+        assert r["custom"] == "自定义类别"
 
     def test_prompt_test_no_custom_prompt(self, tmp_path: Path) -> None:
-        """When custom prompt for the given type is empty, error message is shown."""
+        """When custom prompt for the given type is empty, JSONL error is emitted."""
         cfg = self._config_with_prompts(tmp_path, prompts={"tags": "some tags template"})
 
         result = runner.invoke(app, [
@@ -370,11 +381,14 @@ class TestConfigPromptTest:
         ])
 
         assert result.exit_code == 1, result.output
-        assert "未设置自定义提示词" in result.output
-        assert "prompts.title" in result.output
+        lines = self._parse_jsonl(result.output)
+        error_lines = [l for l in lines if l.get("type") == "error"]
+        assert len(error_lines) == 1
+        assert error_lines[0]["error_code"] == "NO_CUSTOM_PROMPT"
+        assert "prompts.title" in error_lines[0]["detail"]
 
     def test_prompt_test_no_api_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """When api_key is empty, both sides show [未配置 API Key]."""
+        """When api_key is empty, JSONL result includes [未配置 API Key] in built_in."""
         cfg = self._config_with_prompts(tmp_path, api_key="", prompts={"title": "Custom: {content}"})
 
         from unittest.mock import MagicMock
@@ -394,10 +408,13 @@ class TestConfigPromptTest:
         ])
 
         assert result.exit_code == 0, result.output
-        assert "[未配置 API Key]" in result.output
+        lines = self._parse_jsonl(result.output)
+        result_lines = [l for l in lines if l.get("type") == "result"]
+        assert len(result_lines) == 1
+        assert result_lines[0]["built_in"] == "[未配置 API Key]"
 
     def test_prompt_test_invalid_type(self, tmp_path: Path) -> None:
-        """Error for unsupported --type value."""
+        """Error JSONL for unsupported --type value."""
         cfg = self._config_with_prompts(tmp_path)
 
         result = runner.invoke(app, [
@@ -408,10 +425,13 @@ class TestConfigPromptTest:
         ])
 
         assert result.exit_code == 1, result.output
-        assert "不支持的类型" in result.output
+        lines = self._parse_jsonl(result.output)
+        error_lines = [l for l in lines if l.get("type") == "error"]
+        assert len(error_lines) == 1
+        assert error_lines[0]["error_code"] == "INVALID_TYPE"
 
     def test_prompt_test_url_fetch_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Adapter fetch error is handled gracefully."""
+        """Adapter fetch error emits JSONL error."""
         from unittest.mock import MagicMock
 
         cfg = self._config_with_prompts(tmp_path, prompts={"title": "Custom: {content}"})
@@ -432,4 +452,7 @@ class TestConfigPromptTest:
         ])
 
         assert result.exit_code == 1, result.output
-        assert "内容获取失败" in result.output
+        lines = self._parse_jsonl(result.output)
+        error_lines = [l for l in lines if l.get("type") == "error"]
+        assert len(error_lines) == 1
+        assert error_lines[0]["error_code"] == "FETCH_ERROR"

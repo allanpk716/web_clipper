@@ -179,14 +179,14 @@ def prompt_test(
     url: str = typer.Option(..., "--url", "-u", help="URL to fetch content from"),
     path: Optional[str] = typer.Option(None, "--path", "-p", help="Path to config file"),
 ) -> None:
-    """Compare built-in and custom prompt results side-by-side."""
+    """Compare built-in and custom prompt results as JSONL."""
     import sys as _sys
 
     # Windows GBK encoding fix (MEM043/MEM047)
     _sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
 
     if type not in ("title", "tags", "classify"):
-        print(f"错误: 不支持的类型 '{type}'，请使用 title, tags, 或 classify")
+        jsonl_emit_error(stage="prompt_test", detail=f"Unsupported type: {type}", error_code="INVALID_TYPE")
         raise typer.Exit(1)
 
     from web_clip_helper.config import Config
@@ -195,13 +195,13 @@ def prompt_test(
     try:
         config = Config.load(path)
     except Exception as exc:
-        print(f"[加载配置失败: {exc}]")
+        jsonl_emit_error(stage="prompt_test", detail=f"Config load failed: {exc}", error_code="CONFIG_ERROR")
         raise typer.Exit(1)
 
     # Check if custom prompt is set for the requested type
     custom_template = getattr(config.prompts, type, "")
     if not custom_template or not custom_template.strip():
-        print(f"未设置自定义提示词，请先用 config set prompts.{type} 设置")
+        jsonl_emit_error(stage="prompt_test", detail=f"No custom prompt set for prompts.{type}", error_code="NO_CUSTOM_PROMPT")
         raise typer.Exit(1)
 
     # Route URL and fetch content via adapter
@@ -211,18 +211,16 @@ def prompt_test(
         adapter = adapter_cls()
         raw_content = adapter.fetch(url)
     except ValueError as exc:
-        print(f"[URL 路由失败: {exc}]")
+        jsonl_emit_error(stage="prompt_test", detail=f"URL routing failed: {exc}", error_code="URL_ROUTE_ERROR")
         raise typer.Exit(1)
     except Exception as exc:
-        print(f"[内容获取失败: {exc}]")
+        jsonl_emit_error(stage="prompt_test", detail=f"Content fetch failed: {exc}", error_code="FETCH_ERROR")
         raise typer.Exit(1)
 
     content_md = raw_content.content_md
     source_type = raw_content.source_type
 
     # Create two LLMClient instances: built-in (no prompts) and custom (with prompts)
-    from web_clip_helper.config import PromptConfig
-
     built_in_client = LLMClient(config.llm)
     custom_client = LLMClient(config.llm, prompts=config.prompts)
 
@@ -253,17 +251,13 @@ def prompt_test(
     built_in_result = _safe_call(built_in_client, "内置")
     custom_result = _safe_call(custom_client, "自定义")
 
-    # Print human-readable side-by-side comparison
-    separator = "─" * 40
-    print(f"提示词对比测试 — {type}")
-    print(f"URL: {url}")
-    print(separator)
-    print("【内置提示词结果】")
-    print(built_in_result)
-    print()
-    print("【自定义提示词结果】")
-    print(custom_result)
-    print(separator)
+    jsonl_emit_result(
+        stage="prompt_test",
+        prompt_type=type,
+        url=url,
+        built_in=built_in_result,
+        custom=custom_result,
+    )
 
 
 # Register prompt sub-app on config_app
