@@ -6,7 +6,7 @@ All user-facing output goes through ``output.jsonl_emit`` — no bare ``print()`
 from __future__ import annotations
 
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 
@@ -31,6 +31,7 @@ _COMMAND_HELP = [
     {"name": "get", "help": "Get a clipped item by ID"},
     {"name": "search", "help": "Search clipped items by keyword"},
     {"name": "tags", "help": "List or manage tags"},
+    {"name": "update", "help": "Update clip fields (dynamic flag, refresh interval)"},
     {"name": "refresh", "help": "Refresh dynamic clipped items"},
     {"name": "feedback", "help": "Submit feedback on clipping quality"},
     {"name": "config", "help": "Manage configuration (list/get/set + prompt test)"},
@@ -445,6 +446,53 @@ def feedback(
     except Exception as exc:
         jsonl_emit_error(stage="feedback", detail=f"Failed to write feedback file: {exc}")
         raise typer.Exit(1)
+
+
+@app.command(name="update")
+def update_clip(
+    clip_id: int = typer.Argument(..., help="Clip ID to update"),
+    dynamic: Optional[bool] = typer.Option(None, "--dynamic/--no-dynamic", help="Set dynamic flag"),
+    interval: Optional[int] = typer.Option(None, "--interval", "-i", help="Refresh interval in days"),
+) -> None:
+    """Update clip fields (dynamic flag, refresh interval). Output is JSONL."""
+    if dynamic is None and interval is None:
+        jsonl_emit_error(stage="update", detail="At least one option (--dynamic/--no-dynamic or --interval) is required")
+        raise typer.Exit(1)
+
+    if interval is not None and interval <= 0:
+        jsonl_emit_error(stage="update", detail=f"Invalid interval: {interval}. Must be a positive integer")
+        raise typer.Exit(1)
+
+    idx = _get_index()
+    try:
+        record = idx.get_clip(clip_id)
+        if record is None:
+            jsonl_emit_error(stage="update", detail=f"Clip {clip_id} not found")
+            raise typer.Exit(1)
+
+        updates: dict[str, Any] = {}
+        if dynamic is not None:
+            updates["is_dynamic"] = 1 if dynamic else 0
+        if interval is not None:
+            updates["refresh_interval_days"] = interval
+
+        idx.update_clip(clip_id, updates)
+
+        # Build result dict with updated field values
+        result_data: dict[str, Any] = {"id": clip_id}
+        if dynamic is not None:
+            result_data["is_dynamic"] = 1 if dynamic else 0
+        if interval is not None:
+            result_data["refresh_interval_days"] = interval
+
+        jsonl_emit_result(stage="update", **result_data)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        jsonl_emit_error(stage="update", detail=f"Update failed: {exc}")
+        raise typer.Exit(1)
+    finally:
+        idx.close()
 
 
 @app.command(name="refresh")
