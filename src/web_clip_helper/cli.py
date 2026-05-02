@@ -271,6 +271,7 @@ app.add_typer(config_app, name="config", help="Manage configuration")
 def clip(
     url: Optional[str] = typer.Argument(None, help="URL to clip"),
     text: Optional[str] = typer.Option(None, "--text", "-t", help="Clip raw text instead of URL"),
+    no_images: bool = typer.Option(False, "--no-images", help="Skip image downloading entirely"),
 ) -> None:
     """Clip a URL or raw text into Markdown + storage."""
     if not url and not text:
@@ -284,7 +285,7 @@ def clip(
 
     try:
         if url:
-            result = clip_url(url, config)
+            result = clip_url(url, config, skip_images=no_images)
         else:
             result = clip_text(text or "", config)
 

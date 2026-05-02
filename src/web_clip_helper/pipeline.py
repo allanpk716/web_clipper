@@ -60,7 +60,7 @@ def _replace_image_urls(
     return result
 
 
-def clip_url(url: str, config: Config) -> ClipResult | None:
+def clip_url(url: str, config: Config, *, skip_images: bool = False) -> ClipResult | None:
     """Clip a URL end-to-end: route → fetch → images → store → index.
 
     Parameters
@@ -69,6 +69,10 @@ def clip_url(url: str, config: Config) -> ClipResult | None:
         The URL to clip.
     config:
         Application configuration.
+    skip_images:
+        When ``True``, skip image downloading entirely.  The result
+        will report ``image_count=0`` and original remote URLs are
+        left untouched in the markdown.
 
     Returns
     -------
@@ -144,7 +148,7 @@ def clip_url(url: str, config: Config) -> ClipResult | None:
     )
 
     # Delegate to shared storage pipeline
-    return _store_and_index(raw, config)
+    return _store_and_index(raw, config, skip_images=skip_images)
 
 
 def clip_text(text: str, config: Config) -> ClipResult | None:
@@ -224,7 +228,7 @@ def _enrich_with_llm(
     return title, tags, category
 
 
-def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
+def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = False) -> ClipResult | None:
     """Shared pipeline: LLM enrichment → storage → images → markdown save → SQLite index."""
     storage = StorageManager(config.storage_path)
 
@@ -245,11 +249,11 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
     )
 
     # 4. Download images
-    images_dir = storage.get_images_dir(entry_path)
     image_count = 0
     url_map: dict[str, str] = {}
 
-    if raw.images:
+    if raw.images and not skip_images:
+        images_dir = storage.get_images_dir(entry_path)
         try:
             url_map = download_images(
                 raw.images,
