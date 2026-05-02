@@ -92,7 +92,7 @@ def config_list(
         data = config._to_dict()
         _emit_config_items(data, parent="")
     except Exception as exc:
-        jsonl_emit_error(stage="config", detail=f"Failed to list config: {exc}")
+        jsonl_emit_error(stage="config", detail=f"Failed to list config: {exc}", error_code="CONFIG_ERROR")
         raise typer.Exit(1)
 
 
@@ -123,10 +123,10 @@ def config_get(
         display_value = _mask_api_key(str(value)) if key == "llm.api_key" else str(value)
         jsonl_emit_result(stage="config", key=key, value=display_value)
     except KeyError as exc:
-        jsonl_emit_error(stage="config", detail=str(exc))
+        jsonl_emit_error(stage="config", detail=str(exc), error_code="CONFIG_ERROR")
         raise typer.Exit(1)
     except Exception as exc:
-        jsonl_emit_error(stage="config", detail=f"Failed to get config: {exc}")
+        jsonl_emit_error(stage="config", detail=f"Failed to get config: {exc}", error_code="CONFIG_ERROR")
         raise typer.Exit(1)
 
 
@@ -148,10 +148,10 @@ def config_set(
         cfg_mod._cached_config = None
         jsonl_emit_result(stage="config", key=key, value=value, message="Config updated")
     except KeyError as exc:
-        jsonl_emit_error(stage="config", detail=str(exc))
+        jsonl_emit_error(stage="config", detail=str(exc), error_code="CONFIG_ERROR")
         raise typer.Exit(1)
     except Exception as exc:
-        jsonl_emit_error(stage="config", detail=f"Failed to set config: {exc}")
+        jsonl_emit_error(stage="config", detail=f"Failed to set config: {exc}", error_code="CONFIG_ERROR")
         raise typer.Exit(1)
 
 
@@ -273,7 +273,7 @@ def clip(
 ) -> None:
     """Clip a URL or raw text into Markdown + storage."""
     if not url and not text:
-        jsonl_emit_error(stage="clip", detail="Either a URL or text must be provided")
+        jsonl_emit_error(stage="clip", detail="Either a URL or text must be provided", error_code="INPUT_INVALID")
         raise typer.Exit(1)
 
     from web_clip_helper.config import get_config
@@ -292,7 +292,7 @@ def clip(
     except typer.Exit:
         raise
     except Exception as exc:
-        jsonl_emit_error(stage="clip", detail=f"Unexpected error: {exc}")
+        jsonl_emit_error(stage="clip", detail=f"Unexpected error: {exc}", error_code="INTERNAL_ERROR")
         raise typer.Exit(1)
 
 
@@ -328,7 +328,7 @@ def list_clips(
         for clip in results:
             jsonl_emit_result(stage="list", **clip)
     except Exception as exc:
-        jsonl_emit_error(stage="list", detail=f"Query failed: {exc}")
+        jsonl_emit_error(stage="list", detail=f"Query failed: {exc}", error_code="INDEX_ERROR")
         raise typer.Exit(1)
     finally:
         idx.close()
@@ -343,13 +343,13 @@ def get_clip(
     try:
         record = idx.get_clip(clip_id)
         if record is None:
-            jsonl_emit_error(stage="get", detail=f"Clip {clip_id} not found")
+            jsonl_emit_error(stage="get", detail=f"Clip {clip_id} not found", error_code="NOT_FOUND")
             raise typer.Exit(1)
         jsonl_emit_result(stage="get", **record)
     except typer.Exit:
         raise
     except Exception as exc:
-        jsonl_emit_error(stage="get", detail=f"Query failed: {exc}")
+        jsonl_emit_error(stage="get", detail=f"Query failed: {exc}", error_code="INDEX_ERROR")
         raise typer.Exit(1)
     finally:
         idx.close()
@@ -367,7 +367,7 @@ def search_clips(
         for clip in results:
             jsonl_emit_result(stage="search", **clip)
     except Exception as exc:
-        jsonl_emit_error(stage="search", detail=f"Search failed: {exc}")
+        jsonl_emit_error(stage="search", detail=f"Search failed: {exc}", error_code="INDEX_ERROR")
         raise typer.Exit(1)
     finally:
         idx.close()
@@ -383,7 +383,7 @@ def list_tags() -> None:
         for entry in tag_list:
             jsonl_emit_result(stage="tags", **entry)
     except Exception as exc:
-        jsonl_emit_error(stage="tags", detail=f"Failed to list tags: {exc}")
+        jsonl_emit_error(stage="tags", detail=f"Failed to list tags: {exc}", error_code="INDEX_ERROR")
         raise typer.Exit(1)
     finally:
         idx.close()
@@ -403,7 +403,7 @@ def feedback(
     from web_clip_helper.config import get_config
 
     if feedback_type not in ("bug", "feature", "other"):
-        jsonl_emit_error(stage="feedback", detail=f"Invalid feedback type: {feedback_type}. Must be bug, feature, or other.")
+        jsonl_emit_error(stage="feedback", detail=f"Invalid feedback type: {feedback_type}. Must be bug, feature, or other.", error_code="INPUT_INVALID")
         raise typer.Exit(1)
 
     config = get_config()
@@ -453,7 +453,7 @@ def feedback(
             message=f"Feedback file generated: {file_path}",
         )
     except Exception as exc:
-        jsonl_emit_error(stage="feedback", detail=f"Failed to write feedback file: {exc}")
+        jsonl_emit_error(stage="feedback", detail=f"Failed to write feedback file: {exc}", error_code="STORAGE_ERROR")
         raise typer.Exit(1)
 
 
@@ -465,18 +465,18 @@ def update_clip(
 ) -> None:
     """Update clip fields (dynamic flag, refresh interval). Output is JSONL."""
     if dynamic is None and interval is None:
-        jsonl_emit_error(stage="update", detail="At least one option (--dynamic/--no-dynamic or --interval) is required")
+        jsonl_emit_error(stage="update", detail="At least one option (--dynamic/--no-dynamic or --interval) is required", error_code="INPUT_INVALID")
         raise typer.Exit(1)
 
     if interval is not None and interval <= 0:
-        jsonl_emit_error(stage="update", detail=f"Invalid interval: {interval}. Must be a positive integer")
+        jsonl_emit_error(stage="update", detail=f"Invalid interval: {interval}. Must be a positive integer", error_code="INPUT_INVALID")
         raise typer.Exit(1)
 
     idx = _get_index()
     try:
         record = idx.get_clip(clip_id)
         if record is None:
-            jsonl_emit_error(stage="update", detail=f"Clip {clip_id} not found")
+            jsonl_emit_error(stage="update", detail=f"Clip {clip_id} not found", error_code="NOT_FOUND")
             raise typer.Exit(1)
 
         updates: dict[str, Any] = {}
@@ -498,7 +498,7 @@ def update_clip(
     except typer.Exit:
         raise
     except Exception as exc:
-        jsonl_emit_error(stage="update", detail=f"Update failed: {exc}")
+        jsonl_emit_error(stage="update", detail=f"Update failed: {exc}", error_code="INDEX_ERROR")
         raise typer.Exit(1)
     finally:
         idx.close()
@@ -542,6 +542,7 @@ def refresh_clips() -> None:
                         stage="refresh",
                         detail=f"Failed to refresh clip #{clip_id}: clip_url returned None",
                         clip_id=clip_id,
+                        error_code="REFRESH_ERROR",
                     )
                     continue
 
@@ -582,6 +583,7 @@ def refresh_clips() -> None:
                     stage="refresh",
                     detail=f"Error refreshing clip #{clip_id}: {exc}",
                     clip_id=clip_id,
+                    error_code="REFRESH_ERROR",
                 )
 
         jsonl_emit_result(
@@ -592,7 +594,7 @@ def refresh_clips() -> None:
         )
 
     except Exception as exc:
-        jsonl_emit_error(stage="refresh", detail=f"Refresh command failed: {exc}")
+        jsonl_emit_error(stage="refresh", detail=f"Refresh command failed: {exc}", error_code="REFRESH_ERROR")
         raise typer.Exit(1)
     finally:
         idx.close()

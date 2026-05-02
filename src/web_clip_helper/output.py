@@ -55,9 +55,23 @@ def jsonl_emit_result(**kwargs: object) -> None:
     jsonl_emit("result", **kwargs)
 
 
-def jsonl_emit_error(stage: str, detail: str, **extra: object) -> None:
-    """Emit an error message with *stage* and *detail* for diagnosis."""
-    jsonl_emit("error", stage=stage, detail=detail, **extra)
+def jsonl_emit_error(
+    stage: str,
+    detail: str,
+    *,
+    error_code: str | None = None,
+    **extra: object,
+) -> None:
+    """Emit an error message with *stage* and *detail* for diagnosis.
+
+    When *error_code* is provided it is included as ``error_code`` in the
+    JSONL payload.  When omitted the field is absent entirely — this
+    preserves backward compatibility with existing consumers.
+    """
+    if error_code is not None:
+        jsonl_emit("error", stage=stage, detail=detail, error_code=error_code, **extra)
+    else:
+        jsonl_emit("error", stage=stage, detail=detail, **extra)
 
 
 def jsonl_emit_warning(message: str, **extra: object) -> None:

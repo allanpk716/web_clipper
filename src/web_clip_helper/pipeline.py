@@ -80,7 +80,7 @@ def clip_url(url: str, config: Config) -> ClipResult | None:
     try:
         adapter_cls = route_url(url)
     except ValueError as exc:
-        jsonl_emit_error(stage="routing", detail=str(exc))
+        jsonl_emit_error(stage="routing", detail=str(exc), error_code="ROUTING_ERROR")
         return None
 
     jsonl_emit_progress(
@@ -93,10 +93,10 @@ def clip_url(url: str, config: Config) -> ClipResult | None:
         adapter = adapter_cls()
         raw: RawContent = adapter.fetch(url)
     except AdapterError as exc:
-        jsonl_emit_error(stage="fetch", detail=str(exc))
+        jsonl_emit_error(stage="fetch", detail=str(exc), error_code="FETCH_ERROR")
         return None
     except Exception as exc:
-        jsonl_emit_error(stage="fetch", detail=f"Unexpected error: {exc}")
+        jsonl_emit_error(stage="fetch", detail=f"Unexpected error: {exc}", error_code="INTERNAL_ERROR")
         return None
 
     jsonl_emit_progress(
@@ -124,7 +124,7 @@ def clip_text(text: str, config: Config) -> ClipResult | None:
         Result on success, ``None`` on unrecoverable error.
     """
     if not text or not text.strip():
-        jsonl_emit_error(stage="clip_text", detail="Empty text input")
+        jsonl_emit_error(stage="clip_text", detail="Empty text input", error_code="INPUT_INVALID")
         return None
 
     jsonl_emit_progress(message="Starting clip for raw text", percent=0)
@@ -197,7 +197,7 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
     try:
         entry_path = storage.create_entry(title, raw.fetched_at)
     except OSError as exc:
-        jsonl_emit_error(stage="storage", detail=str(exc))
+        jsonl_emit_error(stage="storage", detail=str(exc), error_code="STORAGE_ERROR")
         return None
 
     jsonl_emit_progress(
@@ -245,7 +245,7 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
     try:
         md_path = storage.save_markdown(entry_path, content_md, metadata)
     except OSError as exc:
-        jsonl_emit_error(stage="storage", detail=str(exc))
+        jsonl_emit_error(stage="storage", detail=str(exc), error_code="STORAGE_ERROR")
         return None
 
     jsonl_emit_progress(
@@ -268,6 +268,7 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
                 jsonl_emit_error(
                     stage="storage",
                     detail=f"Failed to save extra file {fname}: {exc}",
+                    error_code="STORAGE_ERROR",
                 )
                 return None
 
@@ -288,7 +289,7 @@ def _store_and_index(raw: RawContent, config: Config) -> ClipResult | None:
         })
         index.close()
     except Exception as exc:
-        jsonl_emit_error(stage="index", detail=str(exc))
+        jsonl_emit_error(stage="index", detail=str(exc), error_code="INDEX_ERROR")
         return None
 
     jsonl_emit_progress(
