@@ -124,11 +124,22 @@ class ClipIndex:
     def query_clips(
         self,
         filters: dict[str, Any] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Query clips with optional filters.
+        """Query clips with optional filters and pagination.
 
         Supported filter keys: ``source_type``, ``is_dynamic``,
         ``category``, ``url``.
+
+        Parameters
+        ----------
+        filters:
+            Optional dict of column-value filters.
+        limit:
+            Maximum number of records to return.  ``None`` means no limit.
+        offset:
+            Number of records to skip.  ``None`` means no offset.
 
         Returns
         -------
@@ -149,35 +160,78 @@ class ClipIndex:
         if clauses:
             where = "WHERE " + " AND ".join(clauses)
 
+        # Pagination suffix (SQLite requires LIMIT before OFFSET)
+        pagination = ""
+        if limit is not None:
+            pagination += " LIMIT ?"
+            params.append(limit)
+        elif offset is not None:
+            # OFFSET requires LIMIT in SQLite; -1 = no limit
+            pagination += " LIMIT -1"
+        if offset is not None:
+            pagination += " OFFSET ?"
+            params.append(offset)
+
         rows = conn.execute(
-            f"SELECT * FROM clips {where} ORDER BY id DESC",
+            f"SELECT * FROM clips {where} ORDER BY id DESC{pagination}",
             params,
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
     # ── Tag / Search helpers ─────────────────────────────────────────
 
-    def query_clips_by_tag(self, tag: str) -> list[dict[str, Any]]:
+    def query_clips_by_tag(
+        self,
+        tag: str,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[dict[str, Any]]:
         """Return clips whose tags JSON array contains *tag*.
 
         Uses SQLite JSON functions to query inside the stored JSON array.
         Falls back to a Python-side filter when json1 extension is absent.
+
+        Parameters
+        ----------
+        tag:
+            Tag string to match.
+        limit:
+            Maximum number of records to return.  ``None`` means no limit.
+        offset:
+            Number of records to skip.  ``None`` means no offset.
         """
         conn = self._connect()
+
+        # Pagination suffix (SQLite requires LIMIT before OFFSET)
+        pagination = ""
+        params: list[Any] = [f'%"{tag}"%']
+        if limit is not None:
+            pagination += " LIMIT ?"
+            params.append(limit)
+        elif offset is not None:
+            # OFFSET requires LIMIT in SQLite; -1 = no limit
+            pagination += " LIMIT -1"
+        if offset is not None:
+            pagination += " OFFSET ?"
+            params.append(offset)
+
         try:
             rows = conn.execute(
-                "SELECT * FROM clips WHERE tags LIKE ? ORDER BY id DESC",
-                (f'%"{tag}"%',),
+                f"SELECT * FROM clips WHERE tags LIKE ? ORDER BY id DESC{pagination}",
+                params,
             ).fetchall()
         except sqlite3.OperationalError:
             # Fallback: filter in Python if JSON functions unavailable
             rows = conn.execute("SELECT * FROM clips ORDER BY id DESC").fetchall()
-            results = []
+            filtered = []
             for r in rows:
                 d = self._row_to_dict(r)
                 if tag in d.get("tags", []):
-                    results.append(d)
-            return results
+                    filtered.append(d)
+            # Apply pagination to filtered results
+            start = offset or 0
+            end = start + limit if limit is not None else len(filtered)
+            return filtered[start:end]
         return [self._row_to_dict(r) for r in rows]
 
     def search_clips(self, keyword: str) -> list[dict[str, Any]]:

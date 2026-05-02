@@ -312,21 +312,37 @@ def list_clips(
     tag: Optional[str] = typer.Option(None, "--tag", "-t", help="Filter by tag"),
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category"),
     source_type: Optional[str] = typer.Option(None, "--source-type", "-s", help="Filter by source type"),
+    limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Maximum number of results to return"),
+    offset: Optional[int] = typer.Option(None, "--offset", help="Number of results to skip"),
 ) -> None:
-    """List clipped items with optional filters. Output is JSONL."""
+    """List clipped items with optional filters and pagination. Output is JSONL."""
+    if limit is not None and limit <= 0:
+        jsonl_emit_error(stage="list", detail=f"Invalid limit: {limit}. Must be a positive integer", error_code="INPUT_INVALID")
+        raise typer.Exit(1)
+    if offset is not None and offset < 0:
+        jsonl_emit_error(stage="list", detail=f"Invalid offset: {offset}. Must be a non-negative integer", error_code="INPUT_INVALID")
+        raise typer.Exit(1)
+
     idx = _get_index()
     try:
         if tag:
-            results = idx.query_clips_by_tag(tag)
+            total_results = idx.query_clips_by_tag(tag)
+            results = idx.query_clips_by_tag(tag, limit=limit, offset=offset)
         else:
             filters: dict = {}
             if category:
                 filters["category"] = category
             if source_type:
                 filters["source_type"] = source_type
-            results = idx.query_clips(filters or None)
+            total_results = idx.query_clips(filters or None)
+            results = idx.query_clips(filters or None, limit=limit, offset=offset)
 
-        jsonl_emit_progress(stage="list", message="Query completed", count=len(results))
+        jsonl_emit_progress(
+            stage="list",
+            message="Query completed",
+            total_count=len(total_results),
+            returned_count=len(results),
+        )
         for clip in results:
             jsonl_emit_result(stage="list", **clip)
     except Exception as exc:

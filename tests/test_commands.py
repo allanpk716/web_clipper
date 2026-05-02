@@ -100,6 +100,64 @@ class TestQueryByTag:
         assert results == []
 
 
+class TestQueryClipsPagination:
+    """Pagination tests for ClipIndex.query_clips and query_clips_by_tag."""
+
+    def test_query_clips_limit(self, populated_db: ClipIndex) -> None:
+        results = populated_db.query_clips(limit=2)
+        assert len(results) == 2
+
+    def test_query_clips_offset(self, populated_db: ClipIndex) -> None:
+        all_results = populated_db.query_clips()
+        offset_results = populated_db.query_clips(offset=1)
+        assert len(offset_results) == len(all_results) - 1
+
+    def test_query_clips_limit_and_offset(self, populated_db: ClipIndex) -> None:
+        results = populated_db.query_clips(limit=1, offset=1)
+        assert len(results) == 1
+
+    def test_query_clips_offset_beyond_results(self, populated_db: ClipIndex) -> None:
+        results = populated_db.query_clips(offset=100)
+        assert results == []
+
+    def test_query_clips_limit_zero(self, populated_db: ClipIndex) -> None:
+        results = populated_db.query_clips(limit=0)
+        assert results == []
+
+    def test_query_clips_with_filter_and_limit(self, populated_db: ClipIndex) -> None:
+        results = populated_db.query_clips(filters={"category": "tech"}, limit=1)
+        all_tech = populated_db.query_clips(filters={"category": "tech"})
+        assert len(results) == 1
+        assert len(results) <= len(all_tech)
+
+    def test_query_clips_by_tag_limit(self, populated_db: ClipIndex) -> None:
+        results = populated_db.query_clips_by_tag("python", limit=1)
+        assert len(results) == 1
+
+    def test_query_clips_by_tag_offset(self, populated_db: ClipIndex) -> None:
+        all_results = populated_db.query_clips_by_tag("python")
+        offset_results = populated_db.query_clips_by_tag("python", offset=1)
+        assert len(offset_results) == len(all_results) - 1
+
+    def test_query_clips_by_tag_limit_and_offset(self, populated_db: ClipIndex) -> None:
+        results = populated_db.query_clips_by_tag("python", limit=1, offset=0)
+        assert len(results) == 1
+
+    def test_query_clips_by_tag_offset_beyond_results(self, populated_db: ClipIndex) -> None:
+        results = populated_db.query_clips_by_tag("python", offset=100)
+        assert results == []
+
+    def test_query_clips_no_pagination(self, populated_db: ClipIndex) -> None:
+        """Without limit/offset, returns all results (backward compat)."""
+        results = populated_db.query_clips()
+        assert len(results) == 3
+
+    def test_query_clips_by_tag_no_pagination(self, populated_db: ClipIndex) -> None:
+        """Without limit/offset, returns all results (backward compat)."""
+        results = populated_db.query_clips_by_tag("python")
+        assert len(results) == 2
+
+
 class TestSearchClips:
     def test_search_by_title(self, populated_db: ClipIndex) -> None:
         results = populated_db.search_clips("Python")
@@ -189,7 +247,8 @@ class TestCLIList:
         progress = [m for m in messages if m["type"] == "progress"]
         results = [m for m in messages if m["type"] == "result"]
         assert len(progress) == 1
-        assert progress[0]["count"] == 2
+        assert progress[0]["total_count"] == 2
+        assert progress[0]["returned_count"] == 2
         assert len(results) == 2
 
     def test_list_by_tag(self, cli_config: Path) -> None:
@@ -237,6 +296,114 @@ class TestCLIList:
         results = [m for m in messages if m["type"] == "result"]
         assert len(results) == 1
         assert results[0]["title"] == "A"
+
+    def test_list_with_limit(self, cli_config: Path) -> None:
+        idx = ClipIndex(cli_config)
+        for i in range(5):
+            idx.save_clip({
+                "url": f"https://example.com/{i}", "title": f"Clip {i}",
+                "source_type": "web", "folder_path": f"/{i}", "markdown_path": f"/{i}.md",
+            })
+        idx.close()
+
+        output = _run_cli("list", "--limit", "2")
+        messages = _parse_jsonl(output)
+        progress = [m for m in messages if m["type"] == "progress"]
+        results = [m for m in messages if m["type"] == "result"]
+        assert progress[0]["total_count"] == 5
+        assert progress[0]["returned_count"] == 2
+        assert len(results) == 2
+
+    def test_list_with_offset(self, cli_config: Path) -> None:
+        idx = ClipIndex(cli_config)
+        for i in range(5):
+            idx.save_clip({
+                "url": f"https://example.com/{i}", "title": f"Clip {i}",
+                "source_type": "web", "folder_path": f"/{i}", "markdown_path": f"/{i}.md",
+            })
+        idx.close()
+
+        output = _run_cli("list", "--offset", "3")
+        messages = _parse_jsonl(output)
+        progress = [m for m in messages if m["type"] == "progress"]
+        results = [m for m in messages if m["type"] == "result"]
+        assert progress[0]["total_count"] == 5
+        assert progress[0]["returned_count"] == 2
+        assert len(results) == 2
+
+    def test_list_with_limit_and_offset(self, cli_config: Path) -> None:
+        idx = ClipIndex(cli_config)
+        for i in range(5):
+            idx.save_clip({
+                "url": f"https://example.com/{i}", "title": f"Clip {i}",
+                "source_type": "web", "folder_path": f"/{i}", "markdown_path": f"/{i}.md",
+            })
+        idx.close()
+
+        output = _run_cli("list", "--limit", "2", "--offset", "1")
+        messages = _parse_jsonl(output)
+        progress = [m for m in messages if m["type"] == "progress"]
+        results = [m for m in messages if m["type"] == "result"]
+        assert progress[0]["total_count"] == 5
+        assert progress[0]["returned_count"] == 2
+        assert len(results) == 2
+
+    def test_list_offset_beyond_results(self, cli_config: Path) -> None:
+        idx = ClipIndex(cli_config)
+        idx.save_clip({
+            "url": "https://a.com", "title": "A",
+            "source_type": "web", "folder_path": "/a", "markdown_path": "/a.md",
+        })
+        idx.close()
+
+        output = _run_cli("list", "--offset", "100")
+        messages = _parse_jsonl(output)
+        progress = [m for m in messages if m["type"] == "progress"]
+        results = [m for m in messages if m["type"] == "result"]
+        assert progress[0]["total_count"] == 1
+        assert progress[0]["returned_count"] == 0
+        assert results == []
+
+    def test_list_limit_with_tag_filter(self, cli_config: Path) -> None:
+        idx = ClipIndex(cli_config)
+        idx.save_clip({
+            "url": "https://a.com", "title": "A",
+            "source_type": "web", "tags": ["python"],
+            "folder_path": "/a", "markdown_path": "/a.md",
+        })
+        idx.save_clip({
+            "url": "https://b.com", "title": "B",
+            "source_type": "web", "tags": ["python"],
+            "folder_path": "/b", "markdown_path": "/b.md",
+        })
+        idx.save_clip({
+            "url": "https://c.com", "title": "C",
+            "source_type": "web", "tags": ["java"],
+            "folder_path": "/c", "markdown_path": "/c.md",
+        })
+        idx.close()
+
+        output = _run_cli("list", "--tag", "python", "--limit", "1")
+        messages = _parse_jsonl(output)
+        progress = [m for m in messages if m["type"] == "progress"]
+        results = [m for m in messages if m["type"] == "result"]
+        assert progress[0]["total_count"] == 2
+        assert progress[0]["returned_count"] == 1
+        assert len(results) == 1
+
+    def test_list_invalid_limit(self, cli_config: Path) -> None:
+        output = _run_cli("list", "--limit", "0")
+        messages = _parse_jsonl(output)
+        errors = [m for m in messages if m["type"] == "error"]
+        assert len(errors) == 1
+        assert "Invalid limit" in errors[0]["detail"]
+
+    def test_list_invalid_offset(self, cli_config: Path) -> None:
+        output = _run_cli("list", "--offset", "-1")
+        messages = _parse_jsonl(output)
+        errors = [m for m in messages if m["type"] == "error"]
+        assert len(errors) == 1
+        assert "Invalid offset" in errors[0]["detail"]
 
 
 class TestCLIGet:
