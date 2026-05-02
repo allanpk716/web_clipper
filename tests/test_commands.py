@@ -933,3 +933,48 @@ class TestCLIFeedback:
         from pathlib import Path as P
         feedback_content = P(results[0]["file"]).read_text(encoding="utf-8")
         assert "附加日志" not in feedback_content
+
+
+# ── Version tests ─────────────────────────────────────────────────────
+
+
+class TestCLIVersion:
+    """CLI integration tests for the version command."""
+
+    def test_version_outputs_valid_jsonl(self) -> None:
+        """version command output is valid JSONL."""
+        output = _run_cli("version")
+        messages = _parse_jsonl(output)
+        assert len(messages) >= 1
+
+    def test_version_contains_version_field(self) -> None:
+        """Result JSONL contains a non-empty version field."""
+        output = _run_cli("version")
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert len(results) == 1
+        assert "version" in results[0]
+        assert results[0]["version"] != ""
+
+    def test_version_type_is_result(self) -> None:
+        """Result message type is 'result'."""
+        output = _run_cli("version")
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert len(results) == 1
+
+    def test_version_matches_package_version(self) -> None:
+        """Reported version matches web_clip_helper.__version__."""
+        from web_clip_helper import __version__
+
+        output = _run_cli("version")
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert results[0]["version"] == __version__
+
+    def test_version_stage_is_version(self) -> None:
+        """Result stage is 'version'."""
+        output = _run_cli("version")
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert results[0]["stage"] == "version"

@@ -37,6 +37,7 @@ _COMMAND_HELP = [
     {"name": "refresh", "help": "Refresh dynamic clipped items"},
     {"name": "feedback", "help": "Submit feedback on clipping quality"},
     {"name": "config", "help": "Manage configuration (list/get/set + prompt test)"},
+    {"name": "version", "help": "Print the current version"},
 ]
 
 
@@ -772,6 +773,14 @@ def refresh_clips(
         raise typer.Exit(1)
     finally:
         idx.close()
+
+
+@app.command(name="version")
+def version_command() -> None:
+    """Print the current version as JSONL."""
+    from web_clip_helper import __version__
+
+    jsonl_emit_result(stage="version", version=__version__)
 
 
 if __name__ == "__main__":
