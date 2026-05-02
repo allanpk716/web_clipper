@@ -54,6 +54,9 @@ class ErrorCode:
     # ── Refresh errors ────────────────────────────────────────────
     REFRESH_ERROR = "REFRESH_ERROR"
 
+    # ── Timeout errors ────────────────────────────────────────────
+    TIMEOUT_ERROR = "TIMEOUT_ERROR"
+
     # ── Description mapping ───────────────────────────────────────
 
     _DESCRIPTIONS: dict[str, str] = {
@@ -67,6 +70,7 @@ class ErrorCode:
         "CONFIG_ERROR": "Configuration load/save/validation error",
         "INTERNAL_ERROR": "Unexpected internal error (possible bug)",
         "REFRESH_ERROR": "Dynamic clip refresh failed",
+        "TIMEOUT_ERROR": "Clip operation exceeded the configured wall-clock timeout",
     }
 
     @classmethod

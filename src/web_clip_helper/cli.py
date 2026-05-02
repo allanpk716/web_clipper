@@ -272,29 +272,41 @@ def clip(
     url: Optional[str] = typer.Argument(None, help="URL to clip"),
     text: Optional[str] = typer.Option(None, "--text", "-t", help="Clip raw text instead of URL"),
     no_images: bool = typer.Option(False, "--no-images", help="Skip image downloading entirely"),
+    timeout: int = typer.Option(60, "--timeout", help="Wall-clock timeout in seconds for the entire clip operation"),
 ) -> None:
     """Clip a URL or raw text into Markdown + storage."""
     if not url and not text:
         jsonl_emit_error(stage="clip", detail="Either a URL or text must be provided", error_code="INPUT_INVALID")
         raise typer.Exit(1)
 
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
     from web_clip_helper.config import get_config
     from web_clip_helper.pipeline import clip_text, clip_url
 
     config = get_config()
 
-    try:
+    def _run_clip():
         if url:
-            result = clip_url(url, config, skip_images=no_images)
+            return clip_url(url, config, skip_images=no_images)
         else:
-            result = clip_text(text or "", config)
+            return clip_text(text or "", config)
 
-        if result is None:
-            raise typer.Exit(1)
-    except typer.Exit:
-        raise
-    except Exception as exc:
-        jsonl_emit_error(stage="clip", detail=f"Unexpected error: {exc}", error_code="INTERNAL_ERROR")
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(_run_clip)
+    try:
+        result = future.result(timeout=timeout)
+    except FuturesTimeoutError:
+        executor.shutdown(wait=False, cancel_futures=True)
+        jsonl_emit_error(
+            stage="clip",
+            detail=f"Clip operation timed out after {timeout}s",
+            error_code="TIMEOUT_ERROR",
+        )
+        raise typer.Exit(1)
+
+    executor.shutdown(wait=False)
+    if result is None:
         raise typer.Exit(1)
 
 
