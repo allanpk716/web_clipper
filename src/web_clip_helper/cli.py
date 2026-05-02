@@ -459,6 +459,7 @@ def list_tags() -> None:
 def feedback(
     description: str = typer.Argument(..., help="Problem description"),
     feedback_type: str = typer.Option("bug", "--type", help="Feedback type: bug | feature | other"),
+    attach: Optional[str] = typer.Option(None, "--attach", help="Attach a file (e.g. JSONL log) to the feedback report"),
 ) -> None:
     """Generate a feedback file with environment info. Output is JSONL."""
     import platform
@@ -471,6 +472,29 @@ def feedback(
     if feedback_type not in ("bug", "feature", "other"):
         jsonl_emit_error(stage="feedback", detail=f"Invalid feedback type: {feedback_type}. Must be bug, feature, or other.", error_code="INPUT_INVALID")
         raise typer.Exit(1)
+
+    # Handle --attach option
+    attach_content: str | None = None
+    attach_path_resolved: str | None = None
+    attach_truncated: bool = False
+    max_attach_size = 100 * 1024  # 100 KB
+
+    if attach is not None:
+        attach_file = Path(attach).expanduser().resolve()
+        if not attach_file.is_file():
+            jsonl_emit_error(stage="feedback", detail=f"Attached file not found: {attach}", error_code="INPUT_INVALID")
+            raise typer.Exit(1)
+
+        try:
+            raw_bytes = attach_file.read_bytes()
+            if len(raw_bytes) > max_attach_size:
+                raw_bytes = raw_bytes[:max_attach_size]
+                attach_truncated = True
+            attach_content = raw_bytes.decode("utf-8", errors="replace")
+            attach_path_resolved = str(attach_file)
+        except OSError as exc:
+            jsonl_emit_error(stage="feedback", detail=f"Failed to read attached file: {exc}", error_code="INPUT_INVALID")
+            raise typer.Exit(1)
 
     config = get_config()
 
@@ -505,6 +529,17 @@ def feedback(
         f"{timestamp}\n"
     )
 
+    # Append attached log section if provided
+    if attach_content is not None:
+        truncation_notice = ""
+        if attach_truncated:
+            truncation_notice = "\n> **注意**: 文件超过 100KB，已截断显示。\n"
+        content += (
+            f"\n## \u9644\u52a0\u65e5\u5fd7\n"
+            f"\u6587\u4ef6: {attach_path_resolved}{truncation_notice}\n"
+            f"\n```\n{attach_content}\n```\n"
+        )
+
     feedback_dir = Path.home() / ".web-clip-helper" / "feedback"
     feedback_dir.mkdir(parents=True, exist_ok=True)
     filename = f"feedback_{feedback_type}_{filename_ts}.md"
@@ -512,12 +547,15 @@ def feedback(
 
     try:
         file_path.write_text(content, encoding="utf-8")
-        jsonl_emit_result(
-            stage="feedback",
-            file=str(file_path),
-            feedback_type=feedback_type,
-            message=f"Feedback file generated: {file_path}",
-        )
+        result_kwargs: dict[str, Any] = {
+            "stage": "feedback",
+            "file": str(file_path),
+            "feedback_type": feedback_type,
+            "message": f"Feedback file generated: {file_path}",
+        }
+        if attach_path_resolved is not None:
+            result_kwargs["attached_file"] = attach_path_resolved
+        jsonl_emit_result(**result_kwargs)
     except Exception as exc:
         jsonl_emit_error(stage="feedback", detail=f"Failed to write feedback file: {exc}", error_code="STORAGE_ERROR")
         raise typer.Exit(1)

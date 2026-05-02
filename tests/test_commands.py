@@ -859,3 +859,77 @@ class TestCLIFeedback:
         errors = [m for m in messages if m["type"] == "error"]
         assert len(errors) == 1
         assert "Invalid feedback type" in errors[0]["detail"]
+
+    # ── --attach tests ─────────────────────────────────────────────────
+
+    def test_attach_valid_file(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--attach with a valid file embeds the content in the feedback markdown."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        # Create a JSONL log file to attach
+        log_file = tmp_path / "clip_log.jsonl"
+        log_content = '{"type":"progress","stage":"clip","message":"started"}\n{"type":"result","stage":"clip","id":1}\n'
+        log_file.write_text(log_content, encoding="utf-8")
+
+        output = _run_cli("feedback", "Clip failed silently", "--attach", str(log_file))
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert len(results) == 1
+
+        # JSONL result should have attached_file field
+        assert results[0]["attached_file"] == str(log_file.resolve())
+
+        # Feedback file should contain the log content
+        from pathlib import Path as P
+        feedback_content = P(results[0]["file"]).read_text(encoding="utf-8")
+        assert "## 附加日志" in feedback_content
+        assert "started" in feedback_content
+        assert str(log_file.resolve()) in feedback_content
+
+    def test_attach_nonexistent_file(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--attach with a non-existent file returns INPUT_INVALID error."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        output = _run_cli("feedback", "Bug report", "--attach", "/nonexistent/path/to/file.jsonl")
+        messages = _parse_jsonl(output)
+        errors = [m for m in messages if m["type"] == "error"]
+        assert len(errors) == 1
+        assert errors[0]["error_code"] == "INPUT_INVALID"
+        assert "not found" in errors[0]["detail"]
+
+    def test_attach_large_file_truncated(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--attach with a file >100KB truncates the content and adds a notice."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        # Create a file larger than 100KB
+        big_file = tmp_path / "big_log.jsonl"
+        # 101 KB of data
+        big_content = "x" * (101 * 1024)
+        big_file.write_text(big_content, encoding="utf-8")
+
+        output = _run_cli("feedback", "Large log attached", "--attach", str(big_file))
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert len(results) == 1
+        assert results[0]["attached_file"] == str(big_file.resolve())
+
+        from pathlib import Path as P
+        feedback_content = P(results[0]["file"]).read_text(encoding="utf-8")
+        # Should have truncation notice
+        assert "100KB" in feedback_content
+        assert "截断" in feedback_content
+        assert "## 附加日志" in feedback_content
+
+    def test_attach_without_flag_unchanged(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Without --attach, feedback works as before (no attached_file in result)."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        output = _run_cli("feedback", "Normal report")
+        messages = _parse_jsonl(output)
+        results = [m for m in messages if m["type"] == "result"]
+        assert len(results) == 1
+        assert "attached_file" not in results[0]
+
+        from pathlib import Path as P
+        feedback_content = P(results[0]["file"]).read_text(encoding="utf-8")
+        assert "附加日志" not in feedback_content
