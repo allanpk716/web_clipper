@@ -244,6 +244,56 @@ class ClipIndex:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def search_clips_fulltext(self, keyword: str) -> list[dict[str, Any]]:
+        """Search clips by keyword in title, url, AND markdown file content.
+
+        Metadata matches (title/url) are returned first, followed by content
+        matches.  Results are de-duplicated so a clip is returned at most once.
+
+        File read failures (missing file, encoding errors, permission issues)
+        are non-fatal — the clip is silently skipped.
+
+        Parameters
+        ----------
+        keyword:
+            Case-insensitive search term.
+
+        Returns
+        -------
+        list[dict]
+            Matching clip records, metadata matches first.
+        """
+        # Phase 1: metadata matches (title + url)
+        metadata_results = self.search_clips(keyword)
+        matched_ids = {r["id"] for r in metadata_results}
+
+        # Phase 2: fulltext scan of remaining clips
+        conn = self._connect()
+        rows = conn.execute("SELECT * FROM clips ORDER BY id DESC").fetchall()
+        all_clips = [self._row_to_dict(r) for r in rows]
+
+        keyword_lower = keyword.lower()
+        content_matches: list[dict[str, Any]] = []
+
+        for clip in all_clips:
+            if clip["id"] in matched_ids:
+                continue  # already matched via metadata
+
+            md_path = clip.get("markdown_path", "")
+            if not md_path:
+                continue
+
+            try:
+                content = Path(md_path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError, PermissionError):
+                # Non-fatal: file missing, encoding error, or permission denied
+                continue
+
+            if keyword_lower in content.lower():
+                content_matches.append(clip)
+
+        return metadata_results + content_matches
+
     def list_tags(self) -> list[dict[str, Any]]:
         """Return all unique tags with their usage counts.
 

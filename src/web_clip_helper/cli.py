@@ -376,12 +376,18 @@ def get_clip(
 @app.command(name="search")
 def search_clips(
     keyword: str = typer.Argument(..., help="Search keyword for title/URL"),
+    full: bool = typer.Option(False, "--full", help="Search markdown file content in addition to title/URL"),
 ) -> None:
     """Search clipped items by keyword in title and URL. Output is JSONL."""
     idx = _get_index()
     try:
-        results = idx.search_clips(keyword)
-        jsonl_emit_progress(stage="search", message="Search completed", count=len(results))
+        if full:
+            results = idx.search_clips_fulltext(keyword)
+            mode = "fulltext"
+        else:
+            results = idx.search_clips(keyword)
+            mode = "metadata"
+        jsonl_emit_progress(stage="search", message="Search completed", count=len(results), mode=mode)
         for clip in results:
             jsonl_emit_result(stage="search", **clip)
     except Exception as exc:
