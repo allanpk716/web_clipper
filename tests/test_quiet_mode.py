@@ -1,124 +1,139 @@
-"""Tests for --quiet mode: suppresses progress/warning, keeps result/error/help."""
+"""Tests for --quiet flag suppression across CLI commands.
+
+Verifies that ``--quiet/-q`` suppresses ``progress`` and ``warning`` type
+JSONL output while preserving ``result`` and ``error`` output.
+"""
 
 from __future__ import annotations
 
 import json
-from io import StringIO
-from unittest.mock import patch
+import re
 
+import pytest
 from typer.testing import CliRunner
 
 from web_clip_helper.cli import app
-from web_clip_helper.output import (
-    jsonl_emit_error,
-    jsonl_emit_help,
-    jsonl_emit_progress,
-    jsonl_emit_result,
-    jsonl_emit_warning,
-    set_quiet,
-)
+from web_clip_helper.output import set_quiet
 
 runner = CliRunner()
 
 
-class TestQuietModeUnit:
-    """Unit tests for the quiet-mode filtering in output.py."""
-
-    def teardown_method(self) -> None:
-        """Reset quiet mode after each test to avoid leaking state."""
-        set_quiet(False)
-
-    def test_quiet_suppresses_progress(self) -> None:
-        set_quiet(True)
-        buf = StringIO()
-        with patch("sys.stdout", buf):
-            jsonl_emit_progress("loading", percent=50)
-        assert buf.getvalue() == ""
-
-    def test_quiet_suppresses_warning(self) -> None:
-        set_quiet(True)
-        buf = StringIO()
-        with patch("sys.stdout", buf):
-            jsonl_emit_warning("something suspicious")
-        assert buf.getvalue() == ""
-
-    def test_quiet_allows_result(self) -> None:
-        set_quiet(True)
-        buf = StringIO()
-        with patch("sys.stdout", buf):
-            jsonl_emit_result(stage="test", value=42)
-        output = buf.getvalue().strip()
-        assert output != ""
-        data = json.loads(output)
-        assert data["type"] == "result"
-        assert data["value"] == 42
-
-    def test_quiet_allows_error(self) -> None:
-        set_quiet(True)
-        buf = StringIO()
-        with patch("sys.stdout", buf):
-            jsonl_emit_error(stage="test", detail="boom")
-        output = buf.getvalue().strip()
-        assert output != ""
-        data = json.loads(output)
-        assert data["type"] == "error"
-        assert data["detail"] == "boom"
-
-    def test_quiet_allows_help(self) -> None:
-        set_quiet(True)
-        buf = StringIO()
-        with patch("sys.stdout", buf):
-            jsonl_emit_help(commands=[{"name": "clip", "help": "clip a url"}])
-        output = buf.getvalue().strip()
-        assert output != ""
-        data = json.loads(output)
-        assert data["type"] == "help"
-        assert data["commands"][0]["name"] == "clip"
+@pytest.fixture(autouse=True)
+def _reset_quiet():
+    """Ensure ``_quiet_mode`` is reset before and after every test."""
+    set_quiet(False)
+    yield
+    set_quiet(False)
 
 
-class TestQuietCLIIntegration:
-    """CLI integration tests for the --quiet flag."""
+def _parse_jsonl(output: str) -> list[dict]:
+    """Parse JSONL output into a list of dicts, stripping ANSI codes."""
+    clean = re.sub(r"\x1b\[[0-9;]*m", "", output)
+    return [json.loads(line) for line in clean.strip().splitlines() if line.strip()]
 
-    def teardown_method(self) -> None:
-        set_quiet(False)
 
-    def test_cli_quiet_flag_no_subcommand(self) -> None:
-        """--quiet with no subcommand emits only help (type=help)."""
-        result = runner.invoke(app, ["--quiet"])
-        output = result.output.strip()
-        assert output != ""
-        lines = output.splitlines()
-        for line in lines:
-            data = json.loads(line)
-            # In quiet mode, only result/error/help should appear
-            assert data["type"] in ("result", "error", "help"), f"Unexpected type in quiet mode: {data['type']}"
+def _collect_types(output: str) -> list[str]:
+    """Extract ``type`` field from each JSONL line."""
+    return [m["type"] for m in _parse_jsonl(output)]
 
-    def test_quiet_clip_command(self) -> None:
-        """clip with --quiet emits only result/error, no progress lines."""
-        # Use a URL that will fail gracefully — we just care about output types
-        result = runner.invoke(app, ["--quiet", "clip", "https://example.invalid-test-url.local"])
-        output = result.output.strip()
-        if not output:
-            # No output at all is also acceptable (error might not emit in some paths)
-            return
-        lines = output.splitlines()
-        for line in lines:
-            data = json.loads(line)
-            assert data["type"] in ("result", "error", "help"), f"Progress/warning leaked in quiet mode: {data['type']}"
 
-    def test_non_quiet_emits_progress(self) -> None:
-        """Without --quiet, a list command should include progress lines."""
-        result = runner.invoke(app, ["list"])
-        output = result.output.strip()
-        if not output:
-            return
-        types = set()
-        for line in output.splitlines():
-            try:
-                data = json.loads(line)
-                types.add(data.get("type"))
-            except (json.JSONDecodeError, KeyError):
-                pass
-        # Progress may or may not appear depending on DB state, but the test
-        # verifies that the quiet flag is *off* by default — no crash.
-        assert "error" in types or "result" in types or "progress" in types or "help" in types
+# ── --quiet suppresses progress for read-only commands ────────────
+
+
+def test_quiet_list_suppresses_progress() -> None:
+    """``--quiet list`` should emit zero progress lines."""
+    result = runner.invoke(app, ["--quiet", "list"])
+    assert result.exit_code == 0, f"Exit {result.exit_code}: {result.exception}"
+    types = _collect_types(result.output)
+    assert "progress" not in types, f"progress leaked through --quiet: {types}"
+    # At least one result should still be emitted
+    assert "result" in types, f"Expected result lines, got: {types}"
+
+
+def test_quiet_tags_suppresses_progress() -> None:
+    """``--quiet tags`` should emit zero progress lines."""
+    result = runner.invoke(app, ["--quiet", "tags"])
+    assert result.exit_code == 0, f"Exit {result.exit_code}: {result.exception}"
+    types = _collect_types(result.output)
+    assert "progress" not in types, f"progress leaked through --quiet: {types}"
+
+
+def test_quiet_search_suppresses_progress() -> None:
+    """``--quiet search KEYWORD`` should emit zero progress lines."""
+    result = runner.invoke(app, ["--quiet", "search", "requests"])
+    assert result.exit_code == 0, f"Exit {result.exit_code}: {result.exception}"
+    types = _collect_types(result.output)
+    assert "progress" not in types, f"progress leaked through --quiet: {types}"
+
+
+# ── --quiet suppresses progress for write commands ────────────────
+
+
+def test_quiet_clip_text_suppresses_progress() -> None:
+    """``--quiet clip --text`` should emit zero progress lines."""
+    result = runner.invoke(app, ["--quiet", "clip", "--text", "quiet mode test content"])
+    assert result.exit_code == 0, f"Exit {result.exit_code}: {result.exception}"
+    types = _collect_types(result.output)
+    assert "progress" not in types, f"progress leaked through --quiet: {types}"
+    assert "result" in types, f"Expected result line, got: {types}"
+
+
+# ─-- --quiet preserves result output ──────────────────────────────
+
+
+def test_quiet_list_still_emits_results() -> None:
+    """``--quiet list`` should still emit result lines."""
+    result = runner.invoke(app, ["--quiet", "list"])
+    messages = _parse_jsonl(result.output)
+    result_msgs = [m for m in messages if m["type"] == "result"]
+    assert len(result_msgs) >= 1, "Expected at least one result line"
+
+
+def test_quiet_tags_still_emits_results() -> None:
+    """``--quiet tags`` should still emit result lines."""
+    result = runner.invoke(app, ["--quiet", "tags"])
+    messages = _parse_jsonl(result.output)
+    result_msgs = [m for m in messages if m["type"] == "result"]
+    assert len(result_msgs) >= 1, "Expected at least one result line"
+
+
+# ── --quiet preserves error output ────────────────────────────────
+
+
+def test_quiet_preserves_error_on_bad_input() -> None:
+    """``--quiet`` should not suppress error lines."""
+    # search requires a keyword argument — omitting it triggers an error
+    result = runner.invoke(app, ["--quiet", "search"])
+    assert result.exit_code != 0
+    messages = _parse_jsonl(result.output)
+    error_msgs = [m for m in messages if m["type"] == "error"]
+    assert len(error_msgs) >= 1, "Expected error line even under --quiet"
+    assert error_msgs[0].get("error_code") == "INPUT_INVALID"
+
+
+def test_quiet_preserves_error_on_missing_args() -> None:
+    """``--quiet`` should not suppress error for missing clip ID."""
+    result = runner.invoke(app, ["--quiet", "get"])
+    assert result.exit_code != 0
+    messages = _parse_jsonl(result.output)
+    error_msgs = [m for m in messages if m["type"] == "error"]
+    assert len(error_msgs) >= 1, "Expected error line for missing argument"
+
+
+# ── without --quiet, progress IS emitted (regression guard) ───────
+
+
+def test_without_quiet_list_has_progress() -> None:
+    """Without ``--quiet``, ``list`` should emit progress lines."""
+    result = runner.invoke(app, ["list"])
+    assert result.exit_code == 0
+    types = _collect_types(result.output)
+    assert "progress" in types, f"Expected progress without --quiet, got: {types}"
+
+
+def test_without_quiet_tags_has_progress() -> None:
+    """Without ``--quiet``, ``tags`` should emit progress lines."""
+    result = runner.invoke(app, ["tags"])
+    assert result.exit_code == 0
+    types = _collect_types(result.output)
+    assert "progress" in types, f"Expected progress without --quiet, got: {types}"

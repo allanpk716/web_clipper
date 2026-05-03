@@ -106,7 +106,13 @@ class ClipIndex:
             "is_dynamic", "refresh_interval_days", "last_refreshed_at",
             "created_at", "updated_at",
         ]
-        values = [clip_data.get(col, "") for col in columns]
+        # Column-specific defaults (empty string for most, proper types for int cols)
+        _defaults = {
+            "is_dynamic": 0,
+            "refresh_interval_days": 7,
+            "last_refreshed_at": None,
+        }
+        values = [clip_data.get(col, _defaults.get(col, "")) for col in columns]
         placeholders = ", ".join("?" for _ in columns)
         col_names = ", ".join(columns)
 
@@ -442,6 +448,40 @@ class ClipIndex:
         conn.commit()
         return cursor.rowcount > 0
 
+    # ── Migration ───────────────────────────────────────────────────
+
+    def migrate_field_types(self) -> int:
+        """Fix empty-string values in is_dynamic, refresh_interval_days, last_refreshed_at.
+
+        Converts legacy records where these columns stored empty strings instead
+        of proper integer/NULL values.  Idempotent — safe to run multiple times.
+
+        Returns
+        -------
+        int
+            Total number of rows updated across all three columns.
+        """
+        conn = self._connect()
+        total = 0
+
+        cursor = conn.execute(
+            "UPDATE clips SET is_dynamic = 0 WHERE is_dynamic = '' OR is_dynamic IS NULL"
+        )
+        total += cursor.rowcount
+
+        cursor = conn.execute(
+            "UPDATE clips SET refresh_interval_days = 7 WHERE refresh_interval_days = '' OR refresh_interval_days IS NULL"
+        )
+        total += cursor.rowcount
+
+        cursor = conn.execute(
+            "UPDATE clips SET last_refreshed_at = NULL WHERE last_refreshed_at = ''"
+        )
+        total += cursor.rowcount
+
+        conn.commit()
+        return total
+
     # ── Helpers ──────────────────────────────────────────────────────
 
     @staticmethod
@@ -455,4 +495,11 @@ class ClipIndex:
                 d["tags"] = json.loads(tags_raw)
             except (json.JSONDecodeError, TypeError):
                 d["tags"] = []
+        # Defensive coercion: ensure int fields are never empty strings
+        if d.get("is_dynamic") == "" or d.get("is_dynamic") is None:
+            d["is_dynamic"] = 0
+        if d.get("refresh_interval_days") == "" or d.get("refresh_interval_days") is None:
+            d["refresh_interval_days"] = 7
+        if d.get("last_refreshed_at") == "":
+            d["last_refreshed_at"] = None
         return d

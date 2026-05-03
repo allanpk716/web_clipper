@@ -9,20 +9,238 @@ import json
 import sys
 from typing import Any, Optional
 
+import click
 import typer
+from typer.core import TyperGroup
+
+import io
 
 from web_clip_helper.output import jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning, set_quiet
 
 # Trigger adapter auto-discovery registration
 import web_clip_helper.adapters._registry  # noqa: F401
 
-__all__ = ["app", "config_app"]
+__all__ = ["app", "config_app", "report_app"]
+
+
+class _CapturedOutput(io.StringIO):
+    """A StringIO that also remembers the real stdout for write-through on success.
+
+    Delegates attribute access to the real stdout for any attribute not
+    found on StringIO itself.  This is necessary because Click/Rich call
+    ``sys.stdout.reconfigure()``, read ``sys.stdout.encoding``, etc.
+    during normal command execution — not just on error paths.
+    """
+
+    def __init__(self, real_stdout: Any) -> None:
+        super().__init__()
+        self._real_stdout = real_stdout
+
+    def __getattr__(self, name: str) -> Any:
+        # Delegate to the real stdout for any attribute we don't have.
+        # This covers reconfigure(), encoding, buffer, isatty(), fileno(), etc.
+        return getattr(self._real_stdout, name)
+
+
+class _JSONLGroup(TyperGroup):
+    """Custom TyperGroup that intercepts Click/Typer exceptions and emits JSONL errors.
+
+    Instead of letting Click/Typer render exceptions as rich text (or plain text),
+    we run the command in ``standalone_mode=False`` so that
+    ``click.exceptions.ClickException`` (MissingParameter, NoSuchOption,
+    BadParameter, NoArgsIsHelpError, etc.) propagates back to us.  We then
+    emit a single JSONL error line with ``error_code=INPUT_INVALID`` and
+    propagate the correct exit code.
+    """
+
+    def main(  # type: ignore[override]
+        self,
+        args: Any = None,
+        prog_name: str | None = None,
+        complete_var: str | None = None,
+        standalone_mode: bool = True,
+        windows_expand_args: bool = True,
+        **extra: Any,
+    ) -> Any:
+        if not standalone_mode:
+            # Non-standalone callers (programmatic use) get default behaviour
+            return super().main(
+                args=args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=False,
+                windows_expand_args=windows_expand_args,
+                **extra,
+            )
+
+        # Standalone mode — intercept all Click/Typer exceptions for JSONL output.
+        # We run the inner main in non-standalone mode so ClickException and
+        # Abort propagate rather than being handled by Click's default renderer.
+        #
+        # Redirect stdout to a buffer during execution.  Some Click exceptions
+        # (notably NoArgsIsHelpError) render Rich help text to stdout as a
+        # side-effect of constructing the exception object — before the
+        # exception even reaches our handler.  By capturing stdout, we prevent
+        # that Rich text from leaking into the JSONL output stream.
+        original_stdout = sys.stdout
+        captured = _CapturedOutput(original_stdout)
+        sys.stdout = captured
+        try:
+            rv = super().main(
+                args=args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=False,  # let exceptions propagate
+                windows_expand_args=windows_expand_args,
+                **extra,
+            )
+            captured_output = captured.getvalue()
+            sys.stdout = original_stdout
+
+            # When Click returns exit code 0 with captured output that is NOT
+            # valid JSONL, this is typically --help rendering Rich text.
+            # Intercept and emit JSONL help instead of flushing Rich text.
+            # Normal command output is JSONL (starts with '{'), while Rich
+            # help output starts with whitespace/box-drawing chars.
+            is_help_output = (
+                captured_output
+                and rv in (0, None)
+                and not captured_output.lstrip().startswith("{")
+            )
+            if is_help_output:
+                self._emit_subcommand_jsonl_help(args)
+                sys.exit(0)
+
+            # Success path: flush any legitimate captured output back to real stdout.
+            if captured_output:
+                original_stdout.write(captured_output)
+                original_stdout.flush()
+            # In non-standalone mode, a non-None return value is an exit code
+            # (from click.exceptions.Exit being caught internally).  Propagate
+            # it as a real exit so the CLI behaves correctly.
+            if rv is not None:
+                sys.exit(rv)
+            return rv
+        except click.exceptions.ClickException as exc:
+            # Discard any Rich/Click text that was written to stdout before
+            # the exception reached us, then restore the real stdout.
+            sys.stdout = original_stdout
+            # ClickException covers MissingParameter, NoSuchOption, BadParameter,
+            # NoArgsIsHelpError, UsageError, etc.
+            detail = str(exc.format_message()).strip()
+            if not detail:
+                # NoArgsIsHelpError: ctx.get_help() renders Rich text to stdout
+                # (captured and discarded above) and returns "".  Provide a
+                # meaningful detail instead.
+                detail = "Missing subcommand"
+            jsonl_emit_error(
+                stage="cli",
+                detail=detail,
+                error_code="INPUT_INVALID",
+            )
+            sys.exit(exc.exit_code)
+        except click.exceptions.Abort:
+            sys.stdout = original_stdout
+            jsonl_emit_error(
+                stage="cli",
+                detail="Aborted",
+                error_code="INPUT_INVALID",
+            )
+            sys.exit(1)
+        except SystemExit as exc:
+            sys.stdout = original_stdout
+            # If exit code is 0, help was already emitted by the success-path
+            # handler above.  Just propagate the exit.
+            sys.exit(exc.code if exc.code is not None else 0)
+        except Exception:
+            sys.stdout = original_stdout
+            raise
+
+    def _emit_subcommand_jsonl_help(self, args: Any) -> None:
+        """Resolve the subcommand from *args* and emit JSONL help.
+
+        Walks the Click command tree using the argument list (minus ``--help``/``-h``)
+        to find the leaf command/group.  Then extracts its parameters (options and
+        arguments) and emits structured JSONL help via :func:`jsonl_emit_help`.
+        """
+        import click as _click
+
+        # Normalise args to a list of strings
+        if args is None:
+            args = sys.argv[1:]
+        arg_list = list(args)
+
+        # Strip --help / -h from the end so command resolution works
+        cleaned = [a for a in arg_list if a not in ("--help", "-h")]
+        if not cleaned:
+            # Bare --help with no subcommand — root help is handled by
+            # the main callback's eager help_flag, but belt-and-suspenders.
+            jsonl_emit_help(
+                commands=_COMMAND_HELP,
+                description="LLM Agent-oriented web clipping CLI tool",
+            )
+            return
+
+        # Walk the command tree
+        ctx = _click.Context(_click.Command("root"))
+        cmd: click.Command | click.MultiCommand | None = self  # type: ignore[assignment]
+        command_chain: list[str] = []
+
+        for token in cleaned:
+            if not isinstance(cmd, (click.MultiCommand, click.Group)):
+                break
+            resolved = cmd.get_command(ctx, token)  # type: ignore[union-attr]
+            if resolved is None:
+                break
+            command_chain.append(token)
+            cmd = resolved  # type: ignore[assignment]
+
+        if cmd is None or cmd is self:
+            # Fell through — emit root help as fallback
+            jsonl_emit_help(
+                commands=_COMMAND_HELP,
+                description="LLM Agent-oriented web clipping CLI tool",
+            )
+            return
+
+        command_name = " ".join(command_chain)
+
+        # Extract description from the command's docstring / help attribute
+        description = getattr(cmd, "help", None) or ""
+
+        # Build options list from the command's parameters
+        options: list[dict[str, str]] = []
+        if isinstance(cmd, (click.MultiCommand, click.Group)):
+            # It's a group (like config, prompt) — list sub-commands
+            for name in sorted(cmd.list_commands(ctx)):
+                sub = cmd.get_command(ctx, name)
+                help_text = getattr(sub, "help", None) or "" if sub else ""
+                options.append({"name": name, "help": help_text.strip()})
+        else:
+            # Leaf command — list its params
+            for param in getattr(cmd, "params", []):
+                if isinstance(param, click.Argument):
+                    opts = [param.human_readable_name]
+                    help_text = getattr(param, "help", "") or ""
+                    options.append({"name": opts[0], "help": help_text})
+                elif isinstance(param, click.Option):
+                    opts = param.opts + param.secondary_opts
+                    help_text = getattr(param, "help", "") or ""
+                    options.append({"name": ", ".join(opts), "help": help_text})
+
+        jsonl_emit_help(
+            commands=options,
+            description=description.strip(),
+            command=command_name,
+        )
+
 
 app = typer.Typer(
     name="web-clip-helper",
     add_completion=False,
     invoke_without_command=True,
     no_args_is_help=False,
+    cls=_JSONLGroup,
 )
 
 # Description of sub-commands shown in JSONL help output.
@@ -35,7 +253,7 @@ _COMMAND_HELP = [
     {"name": "delete", "help": "Delete a clipped item by ID"},
     {"name": "update", "help": "Update clip fields (title, tags, category, dynamic flag, refresh interval)"},
     {"name": "refresh", "help": "Refresh dynamic clipped items"},
-    {"name": "feedback", "help": "Submit feedback on clipping quality"},
+    {"name": "report", "help": "Submit and view structured feedback reports"},
     {"name": "config", "help": "Manage configuration (list/get/set + prompt test)"},
     {"name": "version", "help": "Print the current version"},
 ]
@@ -266,6 +484,184 @@ config_app.add_typer(prompt_app, name="prompt", help="Prompt template testing")
 # Register config sub-app on main app
 app.add_typer(config_app, name="config", help="Manage configuration")
 
+# ── Report sub-app ──────────────────────────────────────────────────
+report_app = typer.Typer(
+    name="report",
+    add_completion=False,
+    invoke_without_command=True,
+    no_args_is_help=True,
+    help="Submit and view structured feedback reports",
+)
+
+
+@report_app.command(name="submit")
+def report_submit(
+    description: str = typer.Argument(..., help="Problem description"),
+    report_type: str = typer.Option("bug", "--type", help="Report type: bug | feature | other"),
+    attach: Optional[str] = typer.Option(None, "--attach", help="Attach a file (e.g. JSONL log) to the report"),
+) -> None:
+    """Submit a structured feedback report. Output is JSONL."""
+    import platform
+    from datetime import datetime
+    from pathlib import Path
+
+    from web_clip_helper import __version__
+    from web_clip_helper.config import get_config
+
+    if report_type not in ("bug", "feature", "other"):
+        jsonl_emit_error(stage="report_submit", detail=f"Invalid report type: {report_type}. Must be bug, feature, or other.", error_code="INPUT_INVALID")
+        raise typer.Exit(1)
+
+    # Handle --attach option
+    attach_content: str | None = None
+    attach_path_resolved: str | None = None
+    attach_truncated: bool = False
+    max_attach_size = 100 * 1024  # 100 KB
+
+    if attach is not None:
+        attach_file = Path(attach).expanduser().resolve()
+        if not attach_file.is_file():
+            jsonl_emit_error(stage="report_submit", detail=f"Attached file not found: {attach}", error_code="INPUT_INVALID")
+            raise typer.Exit(1)
+
+        try:
+            raw_bytes = attach_file.read_bytes()
+            if len(raw_bytes) > max_attach_size:
+                raw_bytes = raw_bytes[:max_attach_size]
+                attach_truncated = True
+            attach_content = raw_bytes.decode("utf-8", errors="replace")
+            attach_path_resolved = str(attach_file)
+        except OSError as exc:
+            jsonl_emit_error(stage="report_submit", detail=f"Failed to read attached file: {exc}", error_code="INPUT_INVALID")
+            raise typer.Exit(1)
+
+    config = get_config()
+
+    # Try to get clip count (non-fatal)
+    clip_count_str: str = "N/A"
+    try:
+        from web_clip_helper.index import ClipIndex
+        idx = ClipIndex(config.db_path)
+        clip_count_str = str(len(idx.query_clips()))
+        idx.close()
+    except Exception:
+        pass
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    filename_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    content = (
+        f"# Feedback: {report_type}\n"
+        f"\n"
+        f"## 问题描述\n"
+        f"{description}\n"
+        f"\n"
+        f"## 环境信息\n"
+        f"- Python: {sys.version}\n"
+        f"- OS: {platform.platform()}\n"
+        f"- web-clip-helper 版本: {__version__}\n"
+        f"- 配置路径: {config.storage_path}\n"
+        f"- 数据库: {config.db_path}\n"
+        f"- 剪藏数量: {clip_count_str}\n"
+        f"\n"
+        f"## 生成时间\n"
+        f"{timestamp}\n"
+    )
+
+    # Append attached log section if provided
+    if attach_content is not None:
+        truncation_notice = ""
+        if attach_truncated:
+            truncation_notice = "\n> **注意**: 文件超过 100KB，已截断显示。\n"
+        content += (
+            f"\n## 附加日志\n"
+            f"文件: {attach_path_resolved}{truncation_notice}\n"
+            f"\n```\n{attach_content}\n```\n"
+        )
+
+    reports_dir = Path.home() / ".web-clip-helper" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"report_{report_type}_{filename_ts}.md"
+    file_path = reports_dir / filename
+
+    try:
+        file_path.write_text(content, encoding="utf-8")
+        result_kwargs: dict[str, Any] = {
+            "stage": "report_submit",
+            "file": str(file_path),
+            "report_type": report_type,
+            "message": f"Report file generated: {file_path}",
+        }
+        if attach_path_resolved is not None:
+            result_kwargs["attached_file"] = attach_path_resolved
+        jsonl_emit_result(**result_kwargs)
+    except Exception as exc:
+        jsonl_emit_error(stage="report_submit", detail=f"Failed to write report file: {exc}", error_code="STORAGE_ERROR")
+        raise typer.Exit(1)
+
+
+@report_app.command(name="list")
+def report_list() -> None:
+    """List all submitted reports. Output is JSONL."""
+    from pathlib import Path
+
+    reports_dir = Path.home() / ".web-clip-helper" / "reports"
+
+    reports: list[dict[str, str]] = []
+
+    if reports_dir.is_dir():
+        md_files = sorted(reports_dir.glob("report_*.md"), reverse=True)
+        for md_file in md_files:
+            stem = md_file.stem
+            # Parse type from stem: report_{type}_{timestamp}
+            parts = stem.split("_", 2)
+            report_type = parts[1] if len(parts) >= 3 else "unknown"
+            # Use mtime as created_at
+            created_at = md_file.stat().st_mtime
+            reports.append({
+                "id": stem,
+                "report_type": report_type,
+                "created_at": created_at,
+                "file": str(md_file),
+            })
+
+    jsonl_emit_result(
+        stage="report_list",
+        reports=reports,
+        message=f"Found {len(reports)} report(s)",
+    )
+
+
+@report_app.command(name="show")
+def report_show(
+    report_id: str = typer.Argument(..., help="Report ID (filename stem, e.g. report_bug_20260503_105540)"),
+) -> None:
+    """Show a specific report by ID. Output is JSONL."""
+    from pathlib import Path
+
+    reports_dir = Path.home() / ".web-clip-helper" / "reports"
+    file_path = reports_dir / f"{report_id}.md"
+
+    if not file_path.is_file():
+        jsonl_emit_error(stage="report_show", detail=f"Report not found: {report_id}", error_code="NOT_FOUND")
+        raise typer.Exit(1)
+
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        jsonl_emit_result(
+            stage="report_show",
+            report_id=report_id,
+            file=str(file_path),
+            content=content,
+        )
+    except Exception as exc:
+        jsonl_emit_error(stage="report_show", detail=f"Failed to read report file: {exc}", error_code="STORAGE_ERROR")
+        raise typer.Exit(1)
+
+
+# Register report sub-app on main app
+app.add_typer(report_app, name="report", help="Submit and view structured feedback reports")
+
 
 @app.command()
 def clip(
@@ -481,112 +877,6 @@ def list_tags() -> None:
         raise typer.Exit(1)
     finally:
         idx.close()
-
-
-@app.command(name="feedback")
-def feedback(
-    description: str = typer.Argument(..., help="Problem description"),
-    feedback_type: str = typer.Option("bug", "--type", help="Feedback type: bug | feature | other"),
-    attach: Optional[str] = typer.Option(None, "--attach", help="Attach a file (e.g. JSONL log) to the feedback report"),
-) -> None:
-    """Generate a feedback file with environment info. Output is JSONL."""
-    import platform
-    from datetime import datetime
-    from pathlib import Path
-
-    from web_clip_helper import __version__
-    from web_clip_helper.config import get_config
-
-    if feedback_type not in ("bug", "feature", "other"):
-        jsonl_emit_error(stage="feedback", detail=f"Invalid feedback type: {feedback_type}. Must be bug, feature, or other.", error_code="INPUT_INVALID")
-        raise typer.Exit(1)
-
-    # Handle --attach option
-    attach_content: str | None = None
-    attach_path_resolved: str | None = None
-    attach_truncated: bool = False
-    max_attach_size = 100 * 1024  # 100 KB
-
-    if attach is not None:
-        attach_file = Path(attach).expanduser().resolve()
-        if not attach_file.is_file():
-            jsonl_emit_error(stage="feedback", detail=f"Attached file not found: {attach}", error_code="INPUT_INVALID")
-            raise typer.Exit(1)
-
-        try:
-            raw_bytes = attach_file.read_bytes()
-            if len(raw_bytes) > max_attach_size:
-                raw_bytes = raw_bytes[:max_attach_size]
-                attach_truncated = True
-            attach_content = raw_bytes.decode("utf-8", errors="replace")
-            attach_path_resolved = str(attach_file)
-        except OSError as exc:
-            jsonl_emit_error(stage="feedback", detail=f"Failed to read attached file: {exc}", error_code="INPUT_INVALID")
-            raise typer.Exit(1)
-
-    config = get_config()
-
-    # Try to get clip count (non-fatal)
-    clip_count_str: str = "N/A"
-    try:
-        from web_clip_helper.index import ClipIndex
-        idx = ClipIndex(config.db_path)
-        clip_count_str = str(len(idx.query_clips()))
-        idx.close()
-    except Exception:
-        pass
-
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    filename_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    content = (
-        f"# Feedback: {feedback_type}\n"
-        f"\n"
-        f"## \u95ee\u9898\u63cf\u8ff0\n"
-        f"{description}\n"
-        f"\n"
-        f"## \u73af\u5883\u4fe1\u606f\n"
-        f"- Python: {sys.version}\n"
-        f"- OS: {platform.platform()}\n"
-        f"- web-clip-helper \u7248\u672c: {__version__}\n"
-        f"- \u914d\u7f6e\u8def\u5f84: {config.storage_path}\n"
-        f"- \u6570\u636e\u5e93: {config.db_path}\n"
-        f"- \u526a\u85cf\u6570\u91cf: {clip_count_str}\n"
-        f"\n"
-        f"## \u751f\u6210\u65f6\u95f4\n"
-        f"{timestamp}\n"
-    )
-
-    # Append attached log section if provided
-    if attach_content is not None:
-        truncation_notice = ""
-        if attach_truncated:
-            truncation_notice = "\n> **注意**: 文件超过 100KB，已截断显示。\n"
-        content += (
-            f"\n## \u9644\u52a0\u65e5\u5fd7\n"
-            f"\u6587\u4ef6: {attach_path_resolved}{truncation_notice}\n"
-            f"\n```\n{attach_content}\n```\n"
-        )
-
-    feedback_dir = Path.home() / ".web-clip-helper" / "feedback"
-    feedback_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"feedback_{feedback_type}_{filename_ts}.md"
-    file_path = feedback_dir / filename
-
-    try:
-        file_path.write_text(content, encoding="utf-8")
-        result_kwargs: dict[str, Any] = {
-            "stage": "feedback",
-            "file": str(file_path),
-            "feedback_type": feedback_type,
-            "message": f"Feedback file generated: {file_path}",
-        }
-        if attach_path_resolved is not None:
-            result_kwargs["attached_file"] = attach_path_resolved
-        jsonl_emit_result(**result_kwargs)
-    except Exception as exc:
-        jsonl_emit_error(stage="feedback", detail=f"Failed to write feedback file: {exc}", error_code="STORAGE_ERROR")
-        raise typer.Exit(1)
 
 
 @app.command(name="update")
