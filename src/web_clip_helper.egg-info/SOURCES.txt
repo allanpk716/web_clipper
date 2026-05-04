@@ -38,8 +38,10 @@ tests/test_config.py
 tests/test_config_cli.py
 tests/test_delete_command.py
 tests/test_dynamic_flag.py
+tests/test_e2e_jsonl_purity.py
 tests/test_error_codes.py
 tests/test_exit_codes.py
+tests/test_field_migration.py
 tests/test_get_content.py
 tests/test_images.py
 tests/test_index.py
@@ -50,9 +52,11 @@ tests/test_output.py
 tests/test_pipeline.py
 tests/test_quiet_mode.py
 tests/test_refresh_preserve.py
+tests/test_report_command.py
 tests/test_result_stage.py
 tests/test_search_fulltext.py
 tests/test_storage.py
+tests/test_subcommand_help.py
 tests/test_typer_exception_interception.py
 tests/test_update_command.py
 tests/test_url_utils.py

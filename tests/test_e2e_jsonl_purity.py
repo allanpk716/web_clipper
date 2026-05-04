@@ -131,8 +131,9 @@ def populated_cli_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pat
 
 @pytest.fixture()
 def tmp_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect Path.home() to tmp_path for report commands."""
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    """Redirect get_reports_dir to tmp_path/reports for report commands."""
+    reports_dir = tmp_path / "reports"
+    monkeypatch.setattr("web_clip_helper.cli.get_reports_dir", lambda: reports_dir)
     return tmp_path
 
 
@@ -300,7 +301,7 @@ class TestSuccessScenarios:
 
     def test_report_list(self, cli_config: Path, tmp_home: Path) -> None:
         # Pre-create a report file
-        reports_dir = tmp_home / ".web-clip-helper" / "reports"
+        reports_dir = tmp_home / "reports"
         reports_dir.mkdir(parents=True)
         (reports_dir / "report_bug_20260501_100000.md").write_text("# test", encoding="utf-8")
 
@@ -314,7 +315,7 @@ class TestSuccessScenarios:
     # ── report show <id> ─────────────────────────────────────────
 
     def test_report_show(self, cli_config: Path, tmp_home: Path) -> None:
-        reports_dir = tmp_home / ".web-clip-helper" / "reports"
+        reports_dir = tmp_home / "reports"
         reports_dir.mkdir(parents=True)
         content = "# Feedback: bug\n\nTest content for show"
         (reports_dir / "report_bug_20260501_100000.md").write_text(content, encoding="utf-8")

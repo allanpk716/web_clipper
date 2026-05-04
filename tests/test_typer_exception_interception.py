@@ -8,7 +8,7 @@ Every test:
   1. Invokes the CLI via subprocess so _JSONLGroup.main() runs in standalone mode.
   2. Asserts each stdout line is valid JSON (json.loads does not raise).
   3. Asserts type=error and error_code=INPUT_INVALID.
-  4. Asserts exit code is correct (typically 2 for Click parameter errors).
+  4. Asserts exit code is 2 (semantic INPUT_INVALID exit code).
 """
 
 from __future__ import annotations
@@ -75,46 +75,46 @@ class TestMissingArguments:
     """Commands that require arguments should emit JSONL error when args are missing."""
 
     def test_search_missing_keyword(self) -> None:
-        """search without KEYWORD → JSONL error INPUT_INVALID, exit 2."""
+        """search without KEYWORD → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("search")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
         assert "KEYWORD" in err["detail"]
 
     def test_get_missing_id(self) -> None:
-        """get without CLIP_ID → JSONL error INPUT_INVALID, exit 2."""
+        """get without CLIP_ID → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("get")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
         assert "CLIP_ID" in err["detail"] or "ID" in err["detail"]
 
     def test_delete_missing_id(self) -> None:
-        """delete without CLIP_ID → JSONL error INPUT_INVALID, exit 2."""
+        """delete without CLIP_ID → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("delete")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
         assert "CLIP_ID" in err["detail"] or "ID" in err["detail"]
 
     def test_config_get_missing_key(self) -> None:
-        """config get without KEY → JSONL error INPUT_INVALID, exit 2."""
+        """config get without KEY → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("config", "get")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
 
     def test_config_set_missing_key(self) -> None:
-        """config set without KEY → JSONL error INPUT_INVALID, exit 2."""
+        """config set without KEY → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("config", "set")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
 
     def test_config_set_missing_value(self) -> None:
-        """config set with KEY but no VALUE → JSONL error INPUT_INVALID, exit 2."""
+        """config set with KEY but no VALUE → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("config", "set", "some.key")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
 
     def test_feedback_missing_description(self) -> None:
-        """feedback without DESCRIPTION → JSONL error INPUT_INVALID, exit 2."""
+        """feedback without DESCRIPTION → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("feedback")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
@@ -127,26 +127,26 @@ class TestInvalidOptions:
     """Unknown options should emit JSONL error, not Typer Rich text."""
 
     def test_clip_unknown_option(self) -> None:
-        """clip --nonexistent-option → JSONL error INPUT_INVALID, exit 2."""
+        """clip --nonexistent-option → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("clip", "--nonexistent-option")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
         assert "nonexistent" in err["detail"].lower() or "no such option" in err["detail"].lower()
 
     def test_search_unknown_option(self) -> None:
-        """search --bogus keyword → JSONL error INPUT_INVALID, exit 2."""
+        """search --bogus keyword → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("search", "--bogus", "test")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
 
     def test_list_unknown_option(self) -> None:
-        """list --invalid-flag → JSONL error INPUT_INVALID, exit 2."""
+        """list --invalid-flag → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("list", "--invalid-flag")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
 
     def test_global_unknown_option(self) -> None:
-        """Global unknown option → JSONL error INPUT_INVALID, exit 2."""
+        """Global unknown option → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("--nonexistent-global-flag")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
@@ -178,21 +178,21 @@ class TestNestedSubcommandMissingOptions:
     """config prompt test requires --type and --url; missing either → JSONL error."""
 
     def test_prompt_test_missing_type(self) -> None:
-        """config prompt test without --type → JSONL error INPUT_INVALID, exit 2."""
+        """config prompt test without --type → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("config", "prompt", "test", "--url", "https://example.com")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
         assert "--type" in err["detail"]
 
     def test_prompt_test_missing_url(self) -> None:
-        """config prompt test without --url → JSONL error INPUT_INVALID, exit 2."""
+        """config prompt test without --url → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("config", "prompt", "test", "--type", "title")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2
         assert "--url" in err["detail"]
 
     def test_prompt_test_missing_both(self) -> None:
-        """config prompt test without --type or --url → JSONL error INPUT_INVALID, exit 2."""
+        """config prompt test without --type or --url → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
         r = _run("config", "prompt", "test")
         err = _assert_jsonl_error(r)
         assert r.returncode == 2

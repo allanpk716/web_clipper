@@ -1,4 +1,4 @@
-"""Configuration system — loads from ``~/.web-clip-helper/config.yaml``.
+"""Configuration system — loads from the XDG config directory.
 
 Auto-creates the config directory and a default config file on first access.
 If the YAML file is malformed or missing keys, sensible defaults are used.
@@ -19,12 +19,17 @@ from typing import Any
 
 import yaml
 
+from web_clip_helper.paths import (
+    get_config_dir,
+    get_data_dir,
+    migrate_legacy_data,
+)
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["Config", "PromptConfig", "get_config", "get_by_path", "set_by_path", "_mask_api_key"]
 
-_DEFAULT_CONFIG_DIR = Path.home() / ".web-clip-helper"
-_DEFAULT_CONFIG_PATH = _DEFAULT_CONFIG_DIR / "config.yaml"
+_DEFAULT_CONFIG_PATH = get_config_dir() / "config.yaml"
 
 
 @dataclass
@@ -56,11 +61,18 @@ class PromptConfig:
 class Config:
     """Root configuration object."""
 
-    storage_path: str = str(_DEFAULT_CONFIG_DIR / "clips")
-    db_path: str = str(_DEFAULT_CONFIG_DIR / "clips.db")
+    storage_path: str = ""
+    db_path: str = ""
     llm: LLMConfig = field(default_factory=LLMConfig)
     refresh: RefreshConfig = field(default_factory=RefreshConfig)
     prompts: PromptConfig = field(default_factory=PromptConfig)
+
+    def __post_init__(self) -> None:
+        """Fill empty paths with XDG defaults (computed lazily)."""
+        if not self.storage_path:
+            self.storage_path = str(get_data_dir() / "clips")
+        if not self.db_path:
+            self.db_path = str(get_data_dir() / "clips.db")
 
     # ── Load / save ─────────────────────────────────────────────────
 
@@ -98,8 +110,8 @@ class Config:
         refresh_raw = raw.get("refresh", {}) or {}
         prompts_raw = raw.get("prompts", {}) or {}
         return cls(
-            storage_path=raw.get("storage_path", str(_DEFAULT_CONFIG_DIR / "clips")),
-            db_path=raw.get("db_path", str(_DEFAULT_CONFIG_DIR / "clips.db")),
+            storage_path=raw.get("storage_path", ""),
+            db_path=raw.get("db_path", ""),
             llm=LLMConfig(
                 api_key=llm_raw.get("api_key", ""),
                 base_url=llm_raw.get("base_url", "https://api.openai.com/v1"),
@@ -162,9 +174,19 @@ _cached_config: Config | None = None
 
 
 def get_config(path: Path | str | None = None) -> Config:
-    """Return a cached Config instance (loaded once, then reused)."""
+    """Return a cached Config instance (loaded once, then reused).
+
+    On first call, triggers legacy data migration if needed.
+    """
     global _cached_config
     if _cached_config is None:
+        try:
+            from web_clip_helper.output import jsonl_emit_progress
+
+            migrate_legacy_data(jsonl_emit_progress=jsonl_emit_progress)
+        except Exception:
+            # Non-fatal: migration failure shouldn't block startup
+            migrate_legacy_data()
         _cached_config = Config.load(path)
     return _cached_config
 

@@ -131,7 +131,7 @@ class TestConfigGet:
 
     def test_get_nonexistent_key_returns_error(self, config_file: Path) -> None:
         result = runner.invoke(app, ["config", "get", "nonexistent.key", "--path", str(config_file)])
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == 2, result.output  # CONFIG_ERROR → semantic exit code 2
         lines = _parse_jsonl(result.output)
         error_lines = [l for l in lines if l.get("type") == "error"]
         assert len(error_lines) >= 1
@@ -204,7 +204,7 @@ class TestConfigSet:
 
     def test_set_nonexistent_key_returns_error(self, config_file: Path) -> None:
         result = runner.invoke(app, ["config", "set", "nonexistent.key", "val", "--path", str(config_file)])
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == 2, result.output  # CONFIG_ERROR → semantic exit code 2
         lines = _parse_jsonl(result.output)
         error_lines = [l for l in lines if l.get("type") == "error"]
         assert len(error_lines) >= 1
@@ -224,7 +224,7 @@ class TestConfigSet:
     def test_set_invalid_int_returns_error(self, config_file: Path) -> None:
         """Setting an int field to a non-int value should error."""
         result = runner.invoke(app, ["config", "set", "refresh.default_interval_days", "not-a-number", "--path", str(config_file)])
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == 2, result.output  # CONFIG_ERROR → semantic exit code 2
 
 
 # ── config prompt test ────────────────────────────────────────────
@@ -380,7 +380,7 @@ class TestConfigPromptTest:
             "--path", str(cfg),
         ])
 
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == 2, result.output  # NO_CUSTOM_PROMPT → semantic exit code 2
         lines = self._parse_jsonl(result.output)
         error_lines = [l for l in lines if l.get("type") == "error"]
         assert len(error_lines) == 1
@@ -424,7 +424,7 @@ class TestConfigPromptTest:
             "--path", str(cfg),
         ])
 
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == 2, result.output  # INVALID_TYPE → semantic exit code 2
         lines = self._parse_jsonl(result.output)
         error_lines = [l for l in lines if l.get("type") == "error"]
         assert len(error_lines) == 1
@@ -451,7 +451,7 @@ class TestConfigPromptTest:
             "--path", str(cfg),
         ])
 
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == 4, result.output  # FETCH_ERROR → semantic exit code 4
         lines = self._parse_jsonl(result.output)
         error_lines = [l for l in lines if l.get("type") == "error"]
         assert len(error_lines) == 1

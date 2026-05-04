@@ -35,6 +35,13 @@ def _parse_jsonl(output: str) -> list[dict]:
     return [json.loads(line) for line in output.strip().splitlines() if line.strip()]
 
 
+def _patch_reports_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Patch get_reports_dir to use tmp_path and return the reports dir."""
+    reports_dir = tmp_path / "reports"
+    monkeypatch.setattr("web_clip_helper.cli.get_reports_dir", lambda: reports_dir)
+    return reports_dir
+
+
 @pytest.fixture()
 def cli_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Create a temporary config + DB, patch get_config to use it.
@@ -62,7 +69,7 @@ class TestReportSubmit:
 
     def test_submit_bug_report(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Submit a bug report → file created, JSONL result with correct fields."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        reports_dir = _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("report", "submit", "--type", "bug", "Something is broken")
         messages = _parse_jsonl(output)
@@ -83,7 +90,7 @@ class TestReportSubmit:
 
     def test_submit_feature_report(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Submit a feature report with --type feature."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("report", "submit", "Add dark mode", "--type", "feature")
         messages = _parse_jsonl(output)
@@ -98,7 +105,7 @@ class TestReportSubmit:
 
     def test_submit_other_type(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Submit a report with --type other."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("report", "submit", "General note", "--type", "other")
         messages = _parse_jsonl(output)
@@ -109,7 +116,7 @@ class TestReportSubmit:
 
     def test_submit_invalid_type(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Invalid report type → JSONL error INPUT_INVALID."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("report", "submit", "Test", "--type", "invalid")
         messages = _parse_jsonl(output)
@@ -120,7 +127,7 @@ class TestReportSubmit:
 
     def test_submit_missing_description(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Missing description argument → JSONL error from _JSONLGroup interception."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("report", "submit")
         messages = _parse_jsonl(output)
@@ -129,9 +136,7 @@ class TestReportSubmit:
 
     def test_reports_dir_auto_created(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Reports directory is auto-created if it doesn't exist."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        reports_dir = tmp_path / ".web-clip-helper" / "reports"
+        reports_dir = _patch_reports_dir(tmp_path, monkeypatch)
         assert not reports_dir.exists()
 
         output = _run_cli("report", "submit", "Test description")
@@ -142,7 +147,7 @@ class TestReportSubmit:
 
     def test_filename_format(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Filename follows report_{type}_{YYYYMMDD_HHMMSS}.md pattern."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("report", "submit", "Check filename")
         messages = _parse_jsonl(output)
@@ -153,7 +158,7 @@ class TestReportSubmit:
 
     def test_file_content_structure(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """File content contains expected sections: header, description, env info, timestamps."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("report", "submit", "--type", "bug", "Detailed issue")
         messages = _parse_jsonl(output)
@@ -179,7 +184,7 @@ class TestReportSubmit:
 
     def test_attach_valid_file(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """--attach with valid file → content embedded, attached_file in result."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         log_file = tmp_path / "clip_log.jsonl"
         log_content = '{"type":"progress","stage":"clip","message":"started"}\n'
@@ -198,7 +203,7 @@ class TestReportSubmit:
 
     def test_attach_nonexistent_file(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """--attach with nonexistent file → JSONL error INPUT_INVALID."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("report", "submit", "Bug", "--attach", "/nonexistent/path/file.jsonl")
         messages = _parse_jsonl(output)
@@ -209,7 +214,7 @@ class TestReportSubmit:
 
     def test_attach_large_file_truncated(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """--attach with large file → truncated with notice."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         big_file = tmp_path / "big_log.jsonl"
         big_content = "x" * (101 * 1024)  # 101 KB
@@ -227,10 +232,7 @@ class TestReportSubmit:
 
     def test_write_failure_storage_error(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Write failure → JSONL error STORAGE_ERROR."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        # Create the reports directory but make write_text fail
-        reports_dir = tmp_path / ".web-clip-helper" / "reports"
+        reports_dir = _patch_reports_dir(tmp_path, monkeypatch)
         reports_dir.mkdir(parents=True)
 
         original_write_text = Path.write_text
@@ -259,10 +261,7 @@ class TestReportList:
 
     def test_empty_reports_directory(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Empty reports directory → JSONL result with empty reports array."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        # Pre-create empty reports dir
-        reports_dir = tmp_path / ".web-clip-helper" / "reports"
+        reports_dir = _patch_reports_dir(tmp_path, monkeypatch)
         reports_dir.mkdir(parents=True)
 
         output = _run_cli("report", "list")
@@ -274,7 +273,7 @@ class TestReportList:
 
     def test_nonexistent_reports_directory(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Non-existent reports directory → JSONL result with empty reports array."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("report", "list")
         messages = _parse_jsonl(output)
@@ -284,9 +283,7 @@ class TestReportList:
 
     def test_multiple_reports_sorted_newest_first(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Multiple reports → sorted newest-first (by filename, which encodes timestamp)."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        reports_dir = tmp_path / ".web-clip-helper" / "reports"
+        reports_dir = _patch_reports_dir(tmp_path, monkeypatch)
         reports_dir.mkdir(parents=True)
 
         # Create reports with same type but different timestamps in filenames
@@ -309,9 +306,7 @@ class TestReportList:
 
     def test_each_entry_has_required_fields(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Each list entry has id, report_type, created_at, file fields."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        reports_dir = tmp_path / ".web-clip-helper" / "reports"
+        reports_dir = _patch_reports_dir(tmp_path, monkeypatch)
         reports_dir.mkdir(parents=True)
         (reports_dir / "report_bug_20260503_100000.md").write_text("# Feedback: bug\ntest", encoding="utf-8")
 
@@ -330,9 +325,7 @@ class TestReportList:
 
     def test_jsonl_purity(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Every line of list output is valid JSON."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        reports_dir = tmp_path / ".web-clip-helper" / "reports"
+        reports_dir = _patch_reports_dir(tmp_path, monkeypatch)
         reports_dir.mkdir(parents=True)
         (reports_dir / "report_bug_20260503_100000.md").write_text("test", encoding="utf-8")
 
@@ -344,7 +337,7 @@ class TestReportList:
 
     def test_list_finds_submitted_report(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """report list finds previously submitted reports."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         _run_cli("report", "submit", "Test report for list")
         output = _run_cli("report", "list")
@@ -362,7 +355,7 @@ class TestReportShow:
 
     def test_show_existing_report(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Existing report → JSONL result with report_id, file, content."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         submit_output = _run_cli("report", "submit", "Show test content")
         submit_msgs = _parse_jsonl(submit_output)
@@ -379,7 +372,7 @@ class TestReportShow:
 
     def test_show_content_matches_file(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Content from show matches the actual file on disk."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         submit_output = _run_cli("report", "submit", "Content verification test")
         submit_msgs = _parse_jsonl(submit_output)
@@ -397,7 +390,7 @@ class TestReportShow:
 
     def test_show_nonexistent_report(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Non-existent report ID → JSONL error with NOT_FOUND."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("report", "show", "nonexistent_report")
         messages = _parse_jsonl(output)
@@ -409,7 +402,7 @@ class TestReportShow:
 
     def test_show_missing_report_id(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Missing REPORT_ID argument → JSONL error from _JSONLGroup interception."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("report", "show")
         messages = _parse_jsonl(output)
@@ -425,7 +418,7 @@ class TestFeedbackRemoved:
 
     def test_feedback_command_not_found(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """`feedback 'test'` → JSONL error (no such command)."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        _patch_reports_dir(tmp_path, monkeypatch)
 
         output = _run_cli("feedback", "test")
         messages = _parse_jsonl(output)

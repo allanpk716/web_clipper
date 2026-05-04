@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from web_clip_helper.cli import app
 from web_clip_helper.config import Config
-from web_clip_helper.error_codes import ErrorCode
+from web_clip_helper.error_codes import ErrorCode, EXIT_CODE_MAP, exit_code_for
 from web_clip_helper.index import ClipIndex
 from web_clip_helper.output import jsonl_emit_error
 
@@ -33,7 +33,7 @@ class TestErrorCodeRegistry:
         expected = [
             "INPUT_INVALID", "NOT_FOUND", "STORAGE_ERROR", "INDEX_ERROR",
             "NETWORK_ERROR", "ROUTING_ERROR", "FETCH_ERROR", "CONFIG_ERROR",
-            "INTERNAL_ERROR", "REFRESH_ERROR",
+            "INTERNAL_ERROR", "REFRESH_ERROR", "TIMEOUT_ERROR", "RESOURCE_LOCKED",
         ]
         for code in expected:
             assert hasattr(ErrorCode, code), f"Missing code: {code}"
@@ -53,6 +53,70 @@ class TestErrorCodeRegistry:
         for code, desc in mapping.items():
             assert isinstance(code, str)
             assert isinstance(desc, str)
+
+
+# ── EXIT_CODE_MAP and exit_code_for tests ────────────────────────
+
+
+class TestExitCodeMap:
+    """Verify EXIT_CODE_MAP covers all standard error codes with values 1-5."""
+
+    def test_all_standard_codes_mapped(self) -> None:
+        """Every ErrorCode constant should have an entry in EXIT_CODE_MAP."""
+        for code in ErrorCode.all_codes():
+            assert code in EXIT_CODE_MAP, f"EXIT_CODE_MAP missing: {code}"
+
+    def test_exit_codes_in_range(self) -> None:
+        """All exit codes should be in 1-5."""
+        for code, value in EXIT_CODE_MAP.items():
+            assert 1 <= value <= 5, f"{code} maps to {value}, expected 1-5"
+
+    def test_semantic_grouping(self) -> None:
+        """Verify the semantic exit code grouping per spec."""
+        # Exit 1 — fatal / unknown
+        assert EXIT_CODE_MAP["INTERNAL_ERROR"] == 1
+        assert EXIT_CODE_MAP["FATAL_CRASH"] == 1
+        # Exit 2 — input / config
+        assert EXIT_CODE_MAP["INPUT_INVALID"] == 2
+        assert EXIT_CODE_MAP["CONFIG_ERROR"] == 2
+        # Exit 3 — resource / dependency
+        assert EXIT_CODE_MAP["NOT_FOUND"] == 3
+        assert EXIT_CODE_MAP["STORAGE_ERROR"] == 3
+        assert EXIT_CODE_MAP["INDEX_ERROR"] == 3
+        assert EXIT_CODE_MAP["REFRESH_ERROR"] == 3
+        # Exit 4 — network / third-party
+        assert EXIT_CODE_MAP["NETWORK_ERROR"] == 4
+        assert EXIT_CODE_MAP["FETCH_ERROR"] == 4
+        assert EXIT_CODE_MAP["ROUTING_ERROR"] == 4
+        assert EXIT_CODE_MAP["TIMEOUT_ERROR"] == 4
+        # Exit 5 — concurrency
+        assert EXIT_CODE_MAP["RESOURCE_LOCKED"] == 5
+
+
+class TestExitCodeFor:
+    """Verify exit_code_for() function behavior."""
+
+    def test_known_codes_return_mapped_value(self) -> None:
+        assert exit_code_for("INTERNAL_ERROR") == 1
+        assert exit_code_for("FATAL_CRASH") == 1
+        assert exit_code_for("INPUT_INVALID") == 2
+        assert exit_code_for("CONFIG_ERROR") == 2
+        assert exit_code_for("NOT_FOUND") == 3
+        assert exit_code_for("STORAGE_ERROR") == 3
+        assert exit_code_for("NETWORK_ERROR") == 4
+        assert exit_code_for("FETCH_ERROR") == 4
+        assert exit_code_for("RESOURCE_LOCKED") == 5
+
+    def test_unknown_code_returns_default_1(self) -> None:
+        """Unknown error codes should fall back to exit 1 (fatal / unknown)."""
+        assert exit_code_for("SOME_NEW_ERROR") == 1
+        assert exit_code_for("") == 1
+
+    def test_non_standard_but_recognized_codes(self) -> None:
+        """Non-standard codes used in CLI should also map correctly."""
+        assert exit_code_for("INVALID_TYPE") == 2
+        assert exit_code_for("NO_CUSTOM_PROMPT") == 2
+        assert exit_code_for("URL_ROUTE_ERROR") == 4
 
 
 # ── jsonl_emit_error with error_code ──────────────────────────────

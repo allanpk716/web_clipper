@@ -1,9 +1,9 @@
-"""Tests verifying exit code conventions: 0 for success, 1 for failure.
+"""Tests verifying exit code conventions: 0 for success, non-zero for failure.
 
 Covers three core scenarios from the Typer callback refactor:
   1. No subcommand → JSONL help output + exit 0
-  2. clip without args → error JSONL + exit 1
-  3. get nonexistent ID → error JSONL + exit 1
+  2. clip without args → error JSONL + exit 2 (INPUT_INVALID)
+  3. get nonexistent ID → error JSONL + exit 3 (NOT_FOUND)
 
 Each scenario is tested via both subprocess (`python -m`) and direct
 `app()` invocation to ensure Exit codes propagate correctly through
@@ -76,12 +76,12 @@ class TestNoSubcommandHelp:
 
 
 class TestClipNoArgs:
-    """clip command without URL or text should exit 1."""
+    """clip command without URL or text should exit 2 (INPUT_INVALID)."""
 
-    def test_clip_no_args_subprocess_exit_1(self) -> None:
-        """python -m web_clip_helper.cli clip (no args) should exit 1."""
+    def test_clip_no_args_subprocess_exit_2(self) -> None:
+        """python -m web_clip_helper.cli clip (no args) should exit 2 (INPUT_INVALID)."""
         r = _run_cli("clip")
-        assert r.returncode == 1
+        assert r.returncode == 2
 
     def test_clip_no_args_subprocess_error_jsonl(self) -> None:
         """clip without args should output JSONL with type=error."""
@@ -90,10 +90,10 @@ class TestClipNoArgs:
         assert data["type"] == "error"
         assert data["stage"] == "clip"
 
-    def test_clip_no_args_direct_exit_1(self) -> None:
-        """Direct app() clip (no args) should exit 1."""
+    def test_clip_no_args_direct_exit_2(self) -> None:
+        """Direct app() clip (no args) should exit 2 (INPUT_INVALID)."""
         r = _run_cli_direct(["clip"])
-        assert r.returncode == 1
+        assert r.returncode == 2
 
     def test_clip_no_args_direct_error_jsonl(self) -> None:
         """Direct app() clip (no args) should output JSONL with type=error."""
@@ -107,12 +107,12 @@ class TestClipNoArgs:
 
 
 class TestGetNonexistent:
-    """get command with nonexistent ID should exit 1."""
+    """get command with nonexistent ID should exit 3 (NOT_FOUND)."""
 
-    def test_get_nonexistent_subprocess_exit_1(self) -> None:
-        """python -m web_clip_helper.cli get 999999 should exit 1."""
+    def test_get_nonexistent_subprocess_exit_3(self) -> None:
+        """python -m web_clip_helper.cli get 999999 should exit 3 (NOT_FOUND)."""
         r = _run_cli("get", "999999")
-        assert r.returncode == 1
+        assert r.returncode == 3
 
     def test_get_nonexistent_subprocess_error_jsonl(self) -> None:
         """get nonexistent ID should output JSONL with type=error."""
@@ -120,11 +120,12 @@ class TestGetNonexistent:
         data = json.loads(r.stdout.strip())
         assert data["type"] == "error"
         assert data["stage"] == "get"
+        assert data["error_code"] == "NOT_FOUND"
 
-    def test_get_nonexistent_direct_exit_1(self) -> None:
-        """Direct app() get nonexistent ID should exit 1."""
+    def test_get_nonexistent_direct_exit_3(self) -> None:
+        """Direct app() get nonexistent ID should exit 3 (NOT_FOUND)."""
         r = _run_cli_direct(["get", "999999"])
-        assert r.returncode == 1
+        assert r.returncode == 3
 
     def test_get_nonexistent_direct_error_jsonl(self) -> None:
         """Direct app() get nonexistent ID should output JSONL with type=error."""
@@ -132,6 +133,7 @@ class TestGetNonexistent:
         data = json.loads(r.stdout.strip())
         assert data["type"] == "error"
         assert data["stage"] == "get"
+        assert data["error_code"] == "NOT_FOUND"
 
 
 # ── Additional success-path exit code tests ──────────────────────
@@ -162,9 +164,9 @@ class TestExitCodesSuccess:
 
 
 class TestExitCodesFailure:
-    """Commands should exit 1 on failure (via direct invocation)."""
+    """Commands should exit non-zero on failure (via direct invocation)."""
 
-    def test_config_get_invalid_key_exit_1(self) -> None:
-        """config get with invalid key should exit 1."""
+    def test_config_get_invalid_key_exit_2(self) -> None:
+        """config get with invalid key should exit 2 (CONFIG_ERROR)."""
         exit_code = _run_cli_direct(["config", "get", "nonexistent.key"]).returncode
-        assert exit_code == 1
+        assert exit_code == 2

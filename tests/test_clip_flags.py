@@ -201,7 +201,7 @@ class TestTimeoutFlag:
             runner = CliRunner()
             result = runner.invoke(app, ["clip", "https://example.com/slow-test-timeout", "--timeout", "1"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 4  # TIMEOUT_ERROR → semantic exit code 4
         output = result.output
         lines = [json.loads(line) for line in output.strip().split("\n") if line.strip()]
         error_lines = [l for l in lines if l.get("type") == "error"]

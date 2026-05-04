@@ -30,7 +30,7 @@ from .output import (
 from .storage import StorageManager
 from .url_utils import normalize_url
 
-__all__ = ["clip_text", "clip_url"]
+__all__ = ["clip_text", "clip_url", "plan_clip_text", "plan_clip_url"]
 
 
 def _replace_image_urls(
@@ -376,3 +376,130 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
     jsonl_emit_progress(message="Clip complete", percent=100)
 
     return result
+
+
+# ── Dry-run (plan-only) entry points ──────────────────────────────────
+
+
+def plan_clip_url(url: str, config: Config) -> None:
+    """Preview clip execution plan for a URL without performing real IO.
+
+    Read-only operations (route_url, duplicate check) are performed.
+    No network fetch, no filesystem writes, no SQLite writes occur.
+
+    Emits JSONL:
+      - ``progress`` lines for plan stages
+      - ``result`` with ``dry_run=True`` and an ``ExecutionPlan`` payload
+      - ``error`` on routing failure
+
+    Raises
+    ------
+    SystemExit
+        On unrecoverable routing errors (via jsonl_emit_error).
+    """
+    jsonl_emit_progress(message=f"[dry-run] Planning clip for URL: {url}", percent=0)
+
+    # 1. Route to adapter (read-only — just URL pattern matching)
+    try:
+        adapter_cls = route_url(url)
+    except ValueError as exc:
+        jsonl_emit_error(stage="routing", detail=str(exc), error_code="ROUTING_ERROR")
+        raise SystemExit(1)
+
+    adapter_name = adapter_cls.__name__
+    source_type = getattr(adapter_cls, "source_type", "generic")
+
+    jsonl_emit_progress(
+        message=f"[dry-run] Routed to adapter: {adapter_name}",
+        percent=50,
+    )
+
+    # 2. Duplicate check (read-only SELECT)
+    duplicate = False
+    existing_id: int | None = None
+    try:
+        index = ClipIndex(config.db_path)
+        existing = index.find_by_url(url)
+        index.close()
+        if existing is not None:
+            duplicate = True
+            existing_id = existing["id"]
+    except Exception:
+        # Duplicate check failure is non-fatal in dry-run too
+        pass
+
+    # 3. Build estimated execution plan
+    estimated_actions = [
+        "route_url (completed)",
+        f"adapter.fetch via {adapter_name}",
+    ]
+
+    if duplicate:
+        estimated_actions.append("return duplicate result (no further IO)")
+    else:
+        estimated_actions.extend([
+            "llm_enrichment (title, tags, category)",
+            "storage.create_entry",
+            "download_images",
+            "save_markdown",
+            "save_clip to SQLite index",
+        ])
+
+    jsonl_emit_result(
+        stage="clip",
+        dry_run=True,
+        url=url,
+        plan={
+            "adapter": adapter_name,
+            "source_type": source_type,
+            "duplicate": duplicate,
+            "existing_id": existing_id,
+            "estimated_actions": estimated_actions,
+        },
+    )
+
+    jsonl_emit_progress(message="[dry-run] Plan complete", percent=100)
+
+
+def plan_clip_text(text: str, config: Config) -> None:
+    """Preview clip execution plan for raw text without performing real IO.
+
+    Emits JSONL:
+      - ``progress`` lines for plan stages
+      - ``result`` with ``dry_run=True`` and an ``ExecutionPlan`` payload
+
+    Raises
+    ------
+    SystemExit
+        On empty text input (via jsonl_emit_error).
+    """
+    if not text or not text.strip():
+        jsonl_emit_error(stage="clip_text", detail="Empty text input", error_code="INPUT_INVALID")
+        raise SystemExit(1)
+
+    estimated_title = text.strip()[:50].replace("\n", " ") or "text-clip"
+
+    jsonl_emit_progress(message="[dry-run] Planning clip for raw text", percent=50)
+
+    estimated_actions = [
+        "create RawContent (source_type=text)",
+        "llm_enrichment (title, tags, category)",
+        "storage.create_entry",
+        "save_markdown",
+        "save_clip to SQLite index",
+    ]
+
+    jsonl_emit_result(
+        stage="clip",
+        dry_run=True,
+        plan={
+            "adapter": None,
+            "source_type": "text",
+            "duplicate": False,
+            "existing_id": None,
+            "estimated_title": estimated_title,
+            "estimated_actions": estimated_actions,
+        },
+    )
+
+    jsonl_emit_progress(message="[dry-run] Plan complete", percent=100)
