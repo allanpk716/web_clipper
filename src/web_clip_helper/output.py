@@ -1,23 +1,18 @@
-"""JSONL output layer — every piece of output goes through here.
+"""JSONL output layer — delegates to SDK Writer for all envelope emission.
 
-Each call emits exactly one JSON line to stdout.  The ``type`` field is
-always present and must be one of: progress, result, error, warning, help.
+Every call emits exactly one JSON line via the agentsdk Writer obtained
+from :func:`app.get_writer`.  The public function signatures are unchanged
+so all existing callers continue to work.
 
-Every JSONL line also carries three envelope fields for log correlation and
-version-aware parsing:
-
-- ``version`` — the tool's semantic version (e.g. ``"0.2.0"``).
-- ``tool`` — the tool name (``"web-clip-helper"``).
-- ``timestamp`` — ISO 8601 UTC timestamp with millisecond precision.
+The module still exports :data:`_TOOL_NAME` and :data:`__version__` as
+module-level constants used by other parts of the codebase.
 """
 
 from __future__ import annotations
 
-import json
-import sys
-from datetime import datetime, timezone
+from typing import Any
 
-from web_clip_helper.io_guard import get_real_stdout
+from web_clip_helper.app import get_writer
 
 __all__ = [
     "jsonl_emit",
@@ -33,97 +28,92 @@ __all__ = [
     "set_trace_id",
 ]
 
-_VALID_TYPES = {"progress", "result", "error", "warning", "help", "schema", "dict", "diagnostics"}
-
 _TOOL_NAME = "web-clip-helper"
 
-# Module-level quiet-mode flag — when True, progress and warning messages
-# are silently dropped so only result, error, and help lines are emitted.
-_quiet_mode: bool = False
 
-# Module-level trace ID — correlated across all JSONL lines in one CLI invocation.
-# Set via set_trace_id(); read via get_trace_id().
-_current_trace_id: str | None = None
+# ── Quiet / trace-id delegates ───────────────────────────────────
 
 
 def set_quiet(mode: bool) -> None:
-    """Enable or disable quiet mode.
+    """Enable or disable quiet mode (delegates to SDK Writer).
 
-    When quiet mode is on, ``jsonl_emit`` silently drops ``progress`` and
-    ``warning`` type messages.  ``result``, ``error``, and ``help`` types
-    are always emitted regardless of this setting.
+    When quiet mode is on, ``progress`` and ``warning`` messages are
+    silently dropped by the SDK Writer.
     """
-    global _quiet_mode
-    _quiet_mode = mode
+    get_writer().set_quiet(mode)
 
 
 def set_trace_id(tid: str) -> None:
-    """Set the trace ID for the current CLI invocation.
-
-    Every subsequent ``jsonl_emit`` call will include ``trace_id`` in the
-    JSONL envelope.  This should be called once at CLI startup.
-    """
-    global _current_trace_id
-    _current_trace_id = tid
+    """Set the trace ID for the current CLI invocation (delegates to SDK Writer)."""
+    get_writer().set_trace_id(tid)
 
 
 def get_trace_id() -> str | None:
-    """Return the current trace ID, or ``None`` if unset."""
-    return _current_trace_id
+    """Return the current trace ID, or ``None`` if unset.
+
+    The SDK Writer stores an empty string when unset; we normalise
+    to ``None`` for backward compatibility with callers that expect
+    ``None`` rather than ``""``.
+    """
+    tid = get_writer().trace_id
+    return tid if tid else None
+
+
+# ── Core emit (backward-compatible) ──────────────────────────────
+
+# Mapping from the old string-based type system to SDK Writer methods.
+# "result", "help", "schema", "dict" all map to writer.success().
+_RESULT_LIKE_TYPES = frozenset({"result", "help", "schema", "dict"})
 
 
 def jsonl_emit(type: str, **kwargs: object) -> None:  # noqa: A002
-    """Write one JSON line to stdout.
+    """Write one JSON line via the SDK Writer.
 
     Parameters
     ----------
     type:
-        Message category — one of progress, result, error, warning, help.
+        Message category — one of progress, result, error, warning,
+        help, schema, dict.
     **kwargs:
-        Arbitrary extra fields merged into the JSON object.
-
-    Envelope Fields
-    ---------------
-    Every line includes ``version``, ``tool``, and ``timestamp`` fields.
-    These are injected automatically and cannot be overridden by *kwargs*.
+        Arbitrary extra fields passed to the SDK Writer method.
     """
-    # Quiet mode: suppress progress and warning, keep result/error/help
-    if _quiet_mode and type in ("progress", "warning"):
-        return
+    writer = get_writer()
 
-    if type not in _VALID_TYPES:
-        raise ValueError(f"Invalid JSONL type: {type!r}. Must be one of {_VALID_TYPES}")
+    if type == "progress":
+        # writer.progress(percent: int, message: str)
+        percent = kwargs.get("percent", 0)
+        message = kwargs.get("message", "")
+        writer.progress(int(percent), str(message))
 
-    # Build envelope — import version lazily to avoid circular imports at
-    # module-load time, and generate a millisecond-precision UTC timestamp.
-    from web_clip_helper import __version__  # noqa: F811
+    elif type in _RESULT_LIKE_TYPES:
+        # writer.success(data) — pass all kwargs as data dict
+        writer.success(data=kwargs)
 
-    now = datetime.now(timezone.utc)
-    # ISO 8601 with milliseconds: "2025-01-15T12:34:56.789Z"
-    timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+    elif type == "error":
+        # writer.error_with_code(code, message) or writer.error(message)
+        error_code = kwargs.get("error_code")
+        stage = kwargs.get("stage", "")
+        detail = kwargs.get("detail", "")
+        message = f"[{stage}] {detail}" if stage else str(detail)
+        if error_code is not None:
+            writer.error_with_code(str(error_code), message)
+        else:
+            writer.error(message)
 
-    # Merge user kwargs first, then overlay envelope fields so they always win.
-    # This silently ignores any user-supplied version/tool/timestamp kwargs
-    # rather than raising — callers that pass them (e.g. the version command)
-    # simply get the authoritative envelope value.
-    payload = {"type": type, **kwargs, "version": __version__, "tool": _TOOL_NAME, "timestamp": timestamp}
+    elif type == "warning":
+        message = kwargs.get("message", "")
+        writer.warning(str(message))
 
-    # Inject trace_id into the envelope when set (non-None).
-    # When trace_id is None the field is omitted for backward compatibility.
-    if _current_trace_id is not None:
-        payload["trace_id"] = _current_trace_id
-    line = json.dumps(payload, ensure_ascii=False)
-    _stdout = get_real_stdout()
-    _stdout.write(line + "\n")
-    _stdout.flush()
+    else:
+        raise ValueError(f"Invalid JSONL type: {type!r}")
 
 
-# ── Convenience wrappers ────────────────────────────────────────────
+# ── Convenience wrappers ─────────────────────────────────────────
 
 
 def jsonl_emit_progress(message: str, percent: int | None = None, **extra: object) -> None:
     """Emit a progress message, optionally with a percentage."""
-    payload: dict[str, object] = {"message": message}
+    payload: dict[str, Any] = {"message": message}
     if percent is not None:
         payload["percent"] = percent
     jsonl_emit("progress", **payload, **extra)
@@ -143,9 +133,9 @@ def jsonl_emit_error(
 ) -> None:
     """Emit an error message with *stage* and *detail* for diagnosis.
 
-    When *error_code* is provided it is included as ``error_code`` in the
-    JSONL payload.  When omitted the field is absent entirely — this
-    preserves backward compatibility with existing consumers.
+    When *error_code* is provided it is forwarded to the SDK Writer's
+    ``error_with_code()`` method.  When omitted the generic ``error()``
+    method is used.
     """
     if error_code is not None:
         jsonl_emit("error", stage=stage, detail=detail, error_code=error_code, **extra)

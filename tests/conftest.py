@@ -9,12 +9,14 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _reset_trace_id():
-    """Reset output module trace_id between tests to prevent state leakage."""
-    import web_clip_helper.output as _out
+    """Reset SDK Writer trace_id and quiet mode between tests to prevent state leakage."""
+    from web_clip_helper.app import get_app, _app as _app_mod
 
-    _out._current_trace_id = None
+    # Reset the singleton so each test gets a fresh App/Writer.
+    import web_clip_helper.app as _app_module
+    _app_module._app = None
     yield
-    _out._current_trace_id = None
+    _app_module._app = None
 
 
 @pytest.fixture()
