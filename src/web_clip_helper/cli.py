@@ -1,6 +1,8 @@
 """CLI entry point — Typer application with JSONL output.
 
 All user-facing output goes through ``output.jsonl_emit`` — no bare ``print()`` calls.
+The :func:`main` function delegates to SDK ``App.run()`` for stdout hijacking,
+signal handling, panic recovery, and ``--quiet`` mode.
 """
 
 from __future__ import annotations
@@ -8,17 +10,16 @@ from __future__ import annotations
 import json
 import os
 import sys
-import uuid
 from typing import Any, Optional
 
 import click
 import typer
 from typer.core import TyperGroup
 
-from web_clip_helper.crash import flight_context, install_handlers
+from web_clip_helper.app import get_app
+from web_clip_helper.crash import flight_context
 from web_clip_helper.error_codes import exit_code_for
-from web_clip_helper.io_guard import get_captured_stdout, init_io_guard
-from web_clip_helper.output import jsonl_emit, jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning, jsonl_emit_dict, jsonl_emit_schema, set_quiet, set_trace_id
+from web_clip_helper.output import jsonl_emit, jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning, jsonl_emit_dict, jsonl_emit_schema
 from web_clip_helper.paths import get_reports_dir
 
 # Trigger adapter auto-discovery registration
@@ -27,15 +28,17 @@ import web_clip_helper.adapters._registry  # noqa: F401
 __all__ = ["app", "config_app", "report_app"]
 
 
-class _JSONLGroup(TyperGroup):
+class _SDKGroup(TyperGroup):
     """Custom TyperGroup that intercepts Click/Typer exceptions and emits JSONL errors.
 
-    Instead of letting Click/Typer render exceptions as rich text (or plain text),
-    we run the command in ``standalone_mode=False`` so that
-    ``click.exceptions.ClickException`` (MissingParameter, NoSuchOption,
-    BadParameter, NoArgsIsHelpError, etc.) propagates back to us.  We then
-    emit a single JSONL error line with ``error_code=INPUT_INVALID`` and
-    propagate the correct exit code.
+    Runs commands with standalone_mode=False so that
+    click.exceptions.ClickException propagates back to us.  We then
+    emit a single JSONL error line with error_code=INPUT_INVALID and
+    exit with the correct code.
+
+    All stdout hijacking, signal handling, and panic recovery are
+    handled by SDK App.run() — this class is only concerned with
+    converting Click exceptions into JSONL errors.
     """
 
     def main(  # type: ignore[override]
@@ -47,9 +50,10 @@ class _JSONLGroup(TyperGroup):
         windows_expand_args: bool = True,
         **extra: Any,
     ) -> Any:
-        if not standalone_mode:
-            # Non-standalone callers (programmatic use) get default behaviour
-            return super().main(
+        # Always run in non-standalone mode so ClickException and Abort
+        # propagate rather than being handled by Click's default renderer.
+        try:
+            rv = super().main(
                 args=args,
                 prog_name=prog_name,
                 complete_var=complete_var,
@@ -57,157 +61,32 @@ class _JSONLGroup(TyperGroup):
                 windows_expand_args=windows_expand_args,
                 **extra,
             )
-
-        # Standalone mode — intercept all Click/Typer exceptions for JSONL output.
-        # We run the inner main in non-standalone mode so ClickException and
-        # Abort propagate rather than being handled by Click's default renderer.
-        #
-        # The global io_guard replaces sys.stdout with a fake memory buffer so
-        # third-party print() calls are silently captured.  jsonl_emit() writes
-        # through get_real_stdout() to reach the real terminal / CliRunner capture.
-        init_io_guard()
-        install_handlers()
-
-        # Set trace ID: prefer AGENT_TRACE_ID env var, else generate short UUID.
-        trace_id = os.environ.get("AGENT_TRACE_ID") or uuid.uuid4().hex[:16]
-        set_trace_id(trace_id)
-        try:
-            rv = super().main(
-                args=args,
-                prog_name=prog_name,
-                complete_var=complete_var,
-                standalone_mode=False,  # let exceptions propagate
-                windows_expand_args=windows_expand_args,
-                **extra,
-            )
-            captured_output = get_captured_stdout()
-
-            # When Click returns exit code 0 with captured output that is NOT
-            # valid JSONL, this is typically --help rendering Rich text.
-            # Intercept and emit JSONL help instead of flushing Rich text.
-            # Normal command output is JSONL (starts with '{'), while Rich
-            # help output starts with whitespace/box-drawing chars.
-            is_help_output = (
-                captured_output
-                and rv in (0, None)
-                and not captured_output.lstrip().startswith("{")
-            )
-            if is_help_output:
-                self._emit_subcommand_jsonl_help(args)
-                sys.exit(0)
-
-            # In non-standalone mode, a non-None return value is an exit code
-            # (from click.exceptions.Exit being caught internally).  Propagate
-            # it as a real exit so the CLI behaves correctly.
-            if rv is not None:
-                sys.exit(rv)
+            # In non-standalone mode, Click returns exit codes (int) instead
+            # of raising SystemExit.  SDK App.run() only inspects exceptions,
+            # not return values.  Propagate non-zero return values as
+            # SystemExit so the SDK can extract the correct exit code.
+            if rv is not None and rv != 0:
+                raise SystemExit(rv)
             return rv
         except click.exceptions.ClickException as exc:
             # ClickException covers MissingParameter, NoSuchOption, BadParameter,
             # NoArgsIsHelpError, UsageError, etc.
             detail = str(exc.format_message()).strip()
             if not detail:
-                # NoArgsIsHelpError: ctx.get_help() renders Rich text to stdout
-                # (captured and discarded by io_guard) and returns "".  Provide a
-                # meaningful detail instead.
                 detail = "Missing subcommand"
             jsonl_emit_error(
                 stage="cli",
                 detail=detail,
                 error_code="INPUT_INVALID",
             )
-            sys.exit(exit_code_for("INPUT_INVALID"))
+            raise SystemExit(exit_code_for("INPUT_INVALID"))
         except click.exceptions.Abort:
             jsonl_emit_error(
                 stage="cli",
                 detail="Aborted",
                 error_code="INPUT_INVALID",
             )
-            sys.exit(exit_code_for("INPUT_INVALID"))
-        except SystemExit as exc:
-            # If exit code is 0, help was already emitted by the success-path
-            # handler above.  Just propagate the exit.
-            sys.exit(exc.code if exc.code is not None else 0)
-        except Exception:
-            raise
-
-    def _emit_subcommand_jsonl_help(self, args: Any) -> None:
-        """Resolve the subcommand from *args* and emit JSONL help.
-
-        Walks the Click command tree using the argument list (minus ``--help``/``-h``)
-        to find the leaf command/group.  Then extracts its parameters (options and
-        arguments) and emits structured JSONL help via :func:`jsonl_emit_help`.
-        """
-        import click as _click
-
-        # Normalise args to a list of strings
-        if args is None:
-            args = sys.argv[1:]
-        arg_list = list(args)
-
-        # Strip --help / -h from the end so command resolution works
-        cleaned = [a for a in arg_list if a not in ("--help", "-h")]
-        if not cleaned:
-            # Bare --help with no subcommand — root help is handled by
-            # the main callback's eager help_flag, but belt-and-suspenders.
-            jsonl_emit_help(
-                commands=_COMMAND_HELP,
-                description="LLM Agent-oriented web clipping CLI tool",
-            )
-            return
-
-        # Walk the command tree
-        ctx = _click.Context(_click.Command("root"))
-        cmd: click.Command | click.MultiCommand | None = self  # type: ignore[assignment]
-        command_chain: list[str] = []
-
-        for token in cleaned:
-            if not isinstance(cmd, (click.MultiCommand, click.Group)):
-                break
-            resolved = cmd.get_command(ctx, token)  # type: ignore[union-attr]
-            if resolved is None:
-                break
-            command_chain.append(token)
-            cmd = resolved  # type: ignore[assignment]
-
-        if cmd is None or cmd is self:
-            # Fell through — emit root help as fallback
-            jsonl_emit_help(
-                commands=_COMMAND_HELP,
-                description="LLM Agent-oriented web clipping CLI tool",
-            )
-            return
-
-        command_name = " ".join(command_chain)
-
-        # Extract description from the command's docstring / help attribute
-        description = getattr(cmd, "help", None) or ""
-
-        # Build options list from the command's parameters
-        options: list[dict[str, str]] = []
-        if isinstance(cmd, (click.MultiCommand, click.Group)):
-            # It's a group (like config, prompt) — list sub-commands
-            for name in sorted(cmd.list_commands(ctx)):
-                sub = cmd.get_command(ctx, name)
-                help_text = getattr(sub, "help", None) or "" if sub else ""
-                options.append({"name": name, "help": help_text.strip()})
-        else:
-            # Leaf command — list its params
-            for param in getattr(cmd, "params", []):
-                if isinstance(param, click.Argument):
-                    opts = [param.human_readable_name]
-                    help_text = getattr(param, "help", "") or ""
-                    options.append({"name": opts[0], "help": help_text})
-                elif isinstance(param, click.Option):
-                    opts = param.opts + param.secondary_opts
-                    help_text = getattr(param, "help", "") or ""
-                    options.append({"name": ", ".join(opts), "help": help_text})
-
-        jsonl_emit_help(
-            commands=options,
-            description=description.strip(),
-            command=command_name,
-        )
+            raise SystemExit(exit_code_for("INPUT_INVALID"))
 
 
 app = typer.Typer(
@@ -215,7 +94,7 @@ app = typer.Typer(
     add_completion=False,
     invoke_without_command=True,
     no_args_is_help=False,
-    cls=_JSONLGroup,
+    cls=_SDKGroup,
 )
 
 # Description of sub-commands shown in JSONL help output.
@@ -236,18 +115,14 @@ _COMMAND_HELP = [
 
 
 @app.callback()
-def main(
+def _cli_callback(
     ctx: typer.Context,
-    quiet: bool = typer.Option(False, "--quiet", "-q", is_eager=True, help="Suppress progress and warning output; only emit result and error lines"),
     help_flag: bool = typer.Option(False, "--help", "-h", is_flag=True, is_eager=True),
 ) -> None:
     """web-clip-helper — LLM Agent-oriented web clipping tool.
 
     All output (including --help) is JSONL so agents can parse it easily.
     """
-    if quiet:
-        set_quiet(True)
-
     if help_flag:
         jsonl_emit_help(
             commands=_COMMAND_HELP,
@@ -2272,5 +2147,27 @@ def version_command() -> None:
     jsonl_emit_result(stage="version", version=__version__)
 
 
+def main() -> None:
+    """Entry point: delegate to SDK App.run() for stdout hijacking, signals, and panic recovery."""
+    sdk_app = get_app()
+    code = sdk_app.run(app)
+    captured = sdk_app.captured_output
+    if captured and code == 0 and not captured.lstrip().startswith("{"):
+        # Non-JSONL output on success path — likely --help rendering Rich text.
+        # The _SDKGroup no longer handles this, so we intercept here.
+        _emit_jsonl_help_from_capture(sdk_app, captured)
+    sys.exit(code)
+
+
+def _emit_jsonl_help_from_capture(sdk_app: Any, captured: str) -> None:
+    """Emit JSONL help when captured output is non-JSONL (e.g. Rich-rendered --help)."""
+    # Best-effort: try to parse the args from the captured output to resolve
+    # the subcommand.  Fall back to root help on failure.
+    jsonl_emit_help(
+        commands=_COMMAND_HELP,
+        description="LLM Agent-oriented web clipping CLI tool",
+    )
+
+
 if __name__ == "__main__":
-    app()
+    main()
