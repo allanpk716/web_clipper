@@ -11,7 +11,7 @@ Usage::
 
 from __future__ import annotations
 
-from ..adapter import adapter_router
+from .base import adapter_router
 from .github import GitHubAdapter
 from .generic import GenericWebAdapter
 from .weibo_headline import WeiboHeadlineAdapter

@@ -24,7 +24,7 @@ from datetime import datetime
 
 import httpx
 
-from ..adapter import AdapterError, register_adapter
+from .base import AdapterError, register_adapter
 from ..config import get_config
 from ..llm import LLMClient
 from ..models import RawContent

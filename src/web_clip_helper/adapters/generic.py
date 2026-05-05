@@ -15,7 +15,7 @@ import httpx
 from markdownify import markdownify as md
 from readability import Document
 
-from ..adapter import AdapterError
+from .base import AdapterError
 from ..models import RawContent
 from ..output import jsonl_emit_error, jsonl_emit_progress, jsonl_emit_warning
 

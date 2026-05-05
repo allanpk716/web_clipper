@@ -121,7 +121,7 @@ def _check_sqlite() -> dict[str, Any]:
     import time
 
     from web_clip_helper.config import get_config
-    from web_clip_helper.index import ClipIndex
+    from web_clip_helper.repository.index import ClipIndex
 
     start = time.monotonic()
     config = get_config()

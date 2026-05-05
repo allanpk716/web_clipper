@@ -29,7 +29,7 @@ from datetime import datetime
 import httpx
 from markdownify import markdownify as md
 
-from ..adapter import AdapterError, register_adapter
+from .base import AdapterError, register_adapter
 from ..models import RawContent
 from ..output import jsonl_emit_error, jsonl_emit_progress, jsonl_emit_warning
 
