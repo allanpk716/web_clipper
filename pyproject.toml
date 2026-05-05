@@ -28,6 +28,7 @@ dependencies = [
     "pyyaml>=6.0",
     "openai>=1.0.0",
     "platformdirs>=3.0",
+    "agentsdk @ git+https://github.com/allanpk716/ai-agent-cli-rules.git#subdirectory=sdks/python",
 ]
 
 [project.optional-dependencies]
