@@ -61,9 +61,9 @@ def get_trace_id() -> str | None:
 
 # ── Core emit (backward-compatible) ──────────────────────────────
 
-# Mapping from the old string-based type system to SDK Writer methods.
-# "result", "help", "schema", "dict" all map to writer.success().
-_RESULT_LIKE_TYPES = frozenset({"result", "help", "schema", "dict"})
+# Only "result" is a first-class envelope type now.
+# help/schema/dict convenience wrappers all delegate to jsonl_emit("result", ...).
+_RESULT_LIKE_TYPES = frozenset({"result"})
 
 
 def jsonl_emit(type: str, **kwargs: object) -> None:  # noqa: A002
@@ -149,15 +149,15 @@ def jsonl_emit_warning(message: str, **extra: object) -> None:
 
 
 def jsonl_emit_schema(data: dict[str, object], **extra: object) -> None:
-    """Emit a schema message (command parameter descriptions, etc.)."""
-    jsonl_emit("schema", data=data, **extra)
+    """Emit a schema message (backward-compatible wrapper → type=result)."""
+    jsonl_emit("result", data=data, **extra)
 
 
 def jsonl_emit_dict(data: dict[str, object], **extra: object) -> None:
-    """Emit a dictionary message (error codes, diagnostics lookups, etc.)."""
-    jsonl_emit("dict", data=data, **extra)
+    """Emit a dictionary message (backward-compatible wrapper → type=result)."""
+    jsonl_emit("result", data=data, **extra)
 
 
 def jsonl_emit_help(commands: list[dict[str, str]], **extra: object) -> None:
-    """Emit help text (used for ``--help`` output)."""
-    jsonl_emit("help", commands=commands, **extra)
+    """Emit help text (backward-compatible wrapper → type=result)."""
+    jsonl_emit("result", commands=commands, **extra)

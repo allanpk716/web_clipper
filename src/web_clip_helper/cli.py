@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import uuid
 from typing import Any, Optional
 
 import click
@@ -19,7 +20,7 @@ from typer.core import TyperGroup
 from web_clip_helper.app import get_app, get_reports_dir, get_crash_dumps_dir, get_state_dir, get_data_dir, get_config_dir
 from web_clip_helper.crash import flight_context
 from web_clip_helper.error_codes import exit_code_for
-from web_clip_helper.output import jsonl_emit, jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning, jsonl_emit_dict, jsonl_emit_schema
+from web_clip_helper.output import jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning, jsonl_emit_dict
 
 # Trigger adapter auto-discovery registration
 import web_clip_helper.adapters._registry  # noqa: F401
@@ -109,7 +110,7 @@ _COMMAND_HELP = [
     {"name": "report", "help": "Submit and view structured feedback reports"},
     {"name": "config", "help": "Manage configuration (list/get/set + prompt test)"},
     {"name": "version", "help": "Print the current version"},
-    {"name": "agent", "help": "Agent reserved namespace — discovery, health, and introspection (info/schema/errors/doctor/update)"},
+    {"name": "agent", "help": "Agent reserved namespace — discovery, health, introspection, and runtime management"},
 ]
 
 
@@ -959,18 +960,19 @@ def refresh_clips(
         idx.close()
 
 
-# ── Agent reserved namespace ──────────────────────────────────────
+# ── Agent reserved namespace (SDK + custom extensions) ───────────
 
-agent_app = typer.Typer(
-    name="agent",
-    add_completion=False,
-    invoke_without_command=True,
-    no_args_is_help=True,
-    help="Agent reserved namespace — discovery and introspection",
-)
+_SENSITIVE_KEY_PARTS = {"api_key", "secret", "token", "password"}
+
+# Build SDK agent Typer with standard commands:
+#   schema, errors, config list/set, doctor, debug-last-crash, cache-clean
+_agent_typer = get_app().agent_commands()
 
 
-@agent_app.command(name="info")
+# ── Custom extension: agent info ──────────────────────────────────
+
+
+@_agent_typer.command(name="info")
 def agent_info() -> None:
     """Output tool version, description, and documentation pointers as JSONL."""
     from web_clip_helper import __version__
@@ -984,92 +986,10 @@ def agent_info() -> None:
     )
 
 
-@agent_app.command(name="schema")
-def agent_schema() -> None:
-    """Output complete parameter descriptions for all business commands."""
-    from web_clip_helper.output import jsonl_emit_schema
-
-    app = get_app()
-    jsonl_emit_schema(data={"commands": app._command_meta}, stage="agent_schema")
+# ── Custom extension: agent update ───────────────────────────────
 
 
-@agent_app.command(name="errors")
-def agent_errors() -> None:
-    """Output all error codes with descriptions and troubleshooting guidance."""
-    from web_clip_helper.error_codes import EXIT_CODE_MAP, ErrorCode
-
-    for code, description in ErrorCode.all_codes().items():
-        exit_code = EXIT_CODE_MAP.get(code, 1)
-        guidance = ErrorCode.guidance(code)
-        jsonl_emit_dict(
-            data={
-                "error_code": code,
-                "exit_code": exit_code,
-                "description": description,
-                "guidance": guidance,
-            },
-            stage="agent_errors",
-        )
-
-
-# ── agent doctor — health diagnostics ────────────────────────────
-# Health check functions have been migrated to app.py and registered
-# as SDK health checks.  The doctor command now delegates there.
-
-
-def _check_storage_dirs() -> dict[str, Any]:
-    """Delegate to app.py health check."""
-    from web_clip_helper.app import _check_storage_dirs as _impl
-    return _impl()
-
-
-def _check_sqlite() -> dict[str, Any]:
-    """Delegate to app.py health check."""
-    from web_clip_helper.app import _check_sqlite as _impl
-    return _impl()
-
-
-def _check_config() -> dict[str, Any]:
-    """Delegate to app.py health check."""
-    from web_clip_helper.app import _check_config as _impl
-    return _impl()
-
-
-def _check_llm_connectivity() -> dict[str, Any]:
-    """Delegate to app.py health check."""
-    from web_clip_helper.app import _check_llm_connectivity as _impl
-    return _impl()
-
-
-@agent_app.command(name="doctor")
-def agent_doctor() -> None:
-    """Run health diagnostics (storage, SQLite, config, LLM connectivity)."""
-    from web_clip_helper.output import jsonl_emit
-
-    checks = [
-        _check_storage_dirs,
-        _check_sqlite,
-        _check_config,
-        _check_llm_connectivity,
-    ]
-
-    counts = {"total": 0, "pass": 0, "fail": 0, "skip": 0}
-
-    for check_fn in checks:
-        result = check_fn()
-        counts["total"] += 1
-        counts[result["status"]] += 1
-        # Emit as diagnostics type
-        jsonl_emit("diagnostics", stage="agent_doctor", **result)
-
-    # Emit summary result line
-    jsonl_emit_result(stage="agent_doctor", **counts)
-
-
-# ── agent update — PyPI version check ────────────────────────────
-
-
-agent_update_app = typer.Typer(
+_agent_update_app = typer.Typer(
     name="update",
     add_completion=False,
     invoke_without_command=True,
@@ -1078,7 +998,7 @@ agent_update_app = typer.Typer(
 )
 
 
-@agent_update_app.command(name="check")
+@_agent_update_app.command(name="check")
 def agent_update_check() -> None:
     """Check PyPI for a newer version of web-clip-helper.
 
@@ -1104,7 +1024,6 @@ def agent_update_check() -> None:
         elapsed = (time.monotonic() - start) * 1000
 
         if resp.status_code == 404:
-            # Package not published on PyPI yet
             jsonl_emit_result(
                 stage="agent_update_check",
                 current_version=current_version,
@@ -1118,7 +1037,6 @@ def agent_update_check() -> None:
         resp.raise_for_status()
         data = resp.json()
 
-        # Extract latest version from PyPI response
         info = data.get("info", {})
         latest_str = info.get("version", "")
         if not latest_str:
@@ -1141,7 +1059,6 @@ def agent_update_check() -> None:
             return
 
         if latest_version > current:
-            # New version available
             changelog_url = f"https://pypi.org/project/web-clip-helper/{latest_str}/#history"
             jsonl_emit_result(
                 stage="agent_update_check",
@@ -1190,653 +1107,7 @@ def agent_update_check() -> None:
         )
 
 
-agent_app.add_typer(agent_update_app, name="update", help="Check for updates")
-
-
-# ── agent auth — API key status ──────────────────────────────────
-
-agent_auth_app = typer.Typer(
-    name="auth",
-    add_completion=False,
-    invoke_without_command=True,
-    no_args_is_help=True,
-    help="Authentication status checks",
-)
-
-
-@agent_auth_app.command(name="status")
-def agent_auth_status() -> None:
-    """Check LLM API key validity via lightweight 1-token completion ping.
-
-    Outputs type=result JSONL with status (valid/invalid/not_configured),
-    masked key hint, and response latency.  Never outputs plaintext tokens.
-    """
-    import time
-
-    import httpx
-
-    from web_clip_helper.config import _mask_api_key, get_config
-
-    config = get_config()
-
-    if not config.llm.api_key or not config.llm.api_key.strip():
-        jsonl_emit_result(
-            stage="agent_auth_status",
-            status="not_configured",
-            masked_key="",
-            message="No API key configured",
-        )
-        return
-
-    masked_key = _mask_api_key(config.llm.api_key)
-    url = f"{config.llm.base_url.rstrip('/')}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {config.llm.api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": config.llm.model,
-        "messages": [{"role": "user", "content": "hi"}],
-        "max_tokens": 1,
-    }
-
-    start = time.monotonic()
-    try:
-        resp = httpx.post(url, json=payload, headers=headers, timeout=15.0)
-        elapsed_ms = (time.monotonic() - start) * 1000
-        resp.raise_for_status()
-        jsonl_emit_result(
-            stage="agent_auth_status",
-            status="valid",
-            masked_key=masked_key,
-            latency_ms=round(elapsed_ms, 2),
-        )
-    except Exception as exc:
-        elapsed_ms = (time.monotonic() - start) * 1000
-        jsonl_emit_result(
-            stage="agent_auth_status",
-            status="invalid",
-            masked_key=masked_key,
-            latency_ms=round(elapsed_ms, 2),
-            detail=str(exc),
-        )
-
-
-agent_app.add_typer(agent_auth_app, name="auth", help="Authentication status checks")
-
-
-# ── agent config — redacted config listing and runtime set ───────
-
-agent_config_app = typer.Typer(
-    name="config",
-    add_completion=False,
-    invoke_without_command=True,
-    no_args_is_help=True,
-    help="Agent config operations",
-)
-
-_SENSITIVE_KEY_PARTS = {"api_key", "secret", "token", "password"}
-
-_AGENT_CONFIG_WHITELIST = {
-    "storage_path",
-    "db_path",
-    "llm.api_key",
-    "llm.base_url",
-    "llm.model",
-    "refresh.default_interval_days",
-    "prompts.title",
-    "prompts.tags",
-    "prompts.classify",
-}
-
-
-def _redact_value(key: str, value: Any) -> str:
-    """Redact sensitive values based on key name patterns."""
-    key_lower = key.lower()
-    if any(p in key_lower for p in _SENSITIVE_KEY_PARTS):
-        if isinstance(value, str) and value:
-            if len(value) <= 8:
-                return "****"
-            return f"{value[:3]}****{value[-4:]}"
-        return "****" if value else ""
-    return str(value)
-
-
-@agent_config_app.command(name="list")
-def agent_config_list() -> None:
-    """List all config values with forced redaction of sensitive fields.
-
-    Outputs one type=dict JSONL line per top-level section (llm, refresh,
-    prompts, plus root-level scalars) and a type=result summary line with
-    total_keys and redacted_keys counts.
-    """
-    from web_clip_helper.config import get_config
-
-    config = get_config()
-    data = config._to_dict()
-
-    total_keys = 0
-    redacted_keys = 0
-
-    # Group root-level scalars into a "root" section
-    root_scalars: dict[str, str] = {}
-    for key, value in data.items():
-        if isinstance(value, dict):
-            redacted_section: dict[str, str] = {}
-            for k, v in value.items():
-                total_keys += 1
-                key_lower = k.lower()
-                is_sensitive = any(p in key_lower for p in _SENSITIVE_KEY_PARTS)
-                if is_sensitive:
-                    redacted_keys += 1
-                redacted_section[k] = _redact_value(k, v)
-            jsonl_emit_dict(data={key: redacted_section}, stage="agent_config_list")
-        else:
-            total_keys += 1
-            root_scalars[key] = str(value)
-
-    if root_scalars:
-        jsonl_emit_dict(data=root_scalars, stage="agent_config_list")
-
-    jsonl_emit_result(
-        stage="agent_config_list",
-        total_keys=total_keys,
-        redacted_keys=redacted_keys,
-    )
-
-
-@agent_config_app.command(name="set")
-def agent_config_set(
-    key: str = typer.Argument(..., help="Config key in dot-path notation"),
-    value: str = typer.Argument(..., help="Value to set"),
-) -> None:
-    """Runtime config modification with whitelist path validation.
-
-    Validates the key against a whitelist of allowed dot-paths, then
-    uses ``set_by_path()`` for type coercion and ``Config.save()`` for
-    persistence.  Outputs type=result JSONL with key, masked_value,
-    and config_path.
-    """
-    import web_clip_helper.config as cfg_mod
-
-    if key not in _AGENT_CONFIG_WHITELIST:
-        jsonl_emit_error(
-            stage="agent_config_set",
-            detail=f"Invalid config path: {key}. Allowed: {', '.join(sorted(_AGENT_CONFIG_WHITELIST))}",
-            error_code="INPUT_INVALID",
-        )
-        raise typer.Exit(exit_code_for("INPUT_INVALID"))
-
-    try:
-        config = cfg_mod.get_config()
-        cfg_mod.set_by_path(config, key, value)
-        config.save()
-        # Invalidate module-level cache so subsequent commands see the new value
-        cfg_mod._cached_config = None
-
-        # Mask value for sensitive keys
-        leaf_key = key.split(".")[-1]
-        display_value = _redact_value(leaf_key, value)
-
-        jsonl_emit_result(
-            stage="agent_config_set",
-            key=key,
-            masked_value=display_value,
-            config_path=str(cfg_mod._DEFAULT_CONFIG_PATH),
-        )
-    except KeyError as exc:
-        jsonl_emit_error(
-            stage="agent_config_set",
-            detail=str(exc),
-            error_code="INPUT_INVALID",
-        )
-        raise typer.Exit(exit_code_for("INPUT_INVALID"))
-    except Exception as exc:
-        jsonl_emit_error(
-            stage="agent_config_set",
-            detail=str(exc),
-            error_code="CONFIG_ERROR",
-        )
-        raise typer.Exit(exit_code_for("CONFIG_ERROR"))
-
-
-agent_app.add_typer(agent_config_app, name="config", help="Agent config operations")
-
-
-# ── agent debug — crash dump + environment snapshot ──────────────
-
-agent_debug_app = typer.Typer(
-    name="debug",
-    add_completion=False,
-    invoke_without_command=True,
-    no_args_is_help=True,
-    help="Debug diagnostics — crash dumps and environment snapshots",
-)
-
-
-@agent_debug_app.command("last-crash")
-def agent_debug_last_crash() -> None:
-    """Read and output the last crash dump.
-
-    If ``.last-crash.json`` exists in the crash dump directory, outputs its
-    contents as ``type=dict`` JSONL (one line) with full crash data.  If the
-    file does not exist, outputs ``type=result`` with ``status=no_crash``.
-    """
-    crash_file = get_crash_dumps_dir() / ".last-crash.json"
-
-    if not crash_file.exists():
-        jsonl_emit_result(
-            stage="agent_debug_last_crash",
-            status="no_crash",
-            detail="No crash dump file found",
-            crash_file=str(crash_file),
-        )
-        return
-
-    try:
-        crash_data = json.loads(crash_file.read_text(encoding="utf-8"))
-        jsonl_emit_dict(data=crash_data, stage="agent_debug_last_crash")
-    except (json.JSONDecodeError, OSError) as exc:
-        jsonl_emit_result(
-            stage="agent_debug_last_crash",
-            status="error",
-            detail=f"Failed to read crash dump: {exc}",
-            crash_file=str(crash_file),
-        )
-
-
-@agent_debug_app.command("env")
-def agent_debug_env(
-    redact: bool = typer.Option(True, "--redact/--no-redact", help="Force redaction of sensitive values"),
-) -> None:
-    """Collect and output an environment snapshot as type=diagnostics JSONL.
-
-    Includes Python version, OS details, tool version, directory paths,
-    LLM configuration (with api_key masked), dependency versions, and
-    environment variable indicators.
-    """
-    import platform
-
-    from web_clip_helper import __version__
-    from web_clip_helper.config import get_config
-
-    config = get_config()
-
-    # ── Python section ─────────────────────────────────────────
-    python_info: dict[str, str] = {
-        "version": platform.python_version(),
-        "implementation": platform.python_implementation(),
-    }
-
-    # ── OS section ─────────────────────────────────────────────
-    os_info: dict[str, str] = {
-        "name": os.name,
-        "platform": sys.platform,
-        "architecture": platform.machine(),
-    }
-
-    # ── Tool section ───────────────────────────────────────────
-    tool_info: dict[str, str] = {
-        "version": __version__,
-    }
-
-    # ── Directories section ────────────────────────────────────
-    dirs_info: dict[str, str] = {
-        "config_dir": str(get_config_dir()),
-        "data_dir": str(get_data_dir()),
-        "state_dir": str(get_state_dir()),
-    }
-
-    # ── LLM section (sensitive values masked) ──────────────────
-    llm_info: dict[str, str] = {
-        "base_url": config.llm.base_url,
-        "model": config.llm.model,
-        "api_key_set": "true" if config.llm.api_key else "false",
-    }
-    if config.llm.api_key:
-        from web_clip_helper.config import _mask_api_key
-
-        llm_info["api_key_hint"] = _mask_api_key(config.llm.api_key)
-
-    # ── Dependencies section ───────────────────────────────────
-    deps_info: dict[str, str] = {}
-    for dep_name in ("httpx", "typer", "readability", "markdownify", "platformdirs", "yaml"):
-        try:
-            if dep_name == "yaml":
-                import yaml
-
-                deps_info["yaml"] = yaml.__version__
-            elif dep_name == "readability":
-                import readability
-
-                deps_info["readability-lxml"] = getattr(readability, "__version__", "unknown")
-            else:
-                mod = __import__(dep_name)
-                deps_info[dep_name] = getattr(mod, "__version__", "unknown")
-        except ImportError:
-            deps_info[dep_name] = "not_installed"
-
-    # ── Environment indicators ─────────────────────────────────
-    env_indicators: dict[str, str] = {}
-    for var in ("WEB_CLIP_LLM_API_KEY", "WEB_CLIP_LLM_BASE_URL", "WEB_CLIP_LLM_MODEL", "AGENT_TRACE_ID"):
-        env_indicators[var] = "set" if os.environ.get(var) else "unset"
-
-    # ── Redaction pass (force-redact any sensitive values) ──────
-    all_sections: dict[str, dict[str, str]] = {
-        "python": python_info,
-        "os": os_info,
-        "tool": tool_info,
-        "directories": dirs_info,
-        "llm": llm_info,
-        "dependencies": deps_info,
-        "env_indicators": env_indicators,
-    }
-
-    if redact:
-        for section_data in all_sections.values():
-            for key in list(section_data.keys()):
-                key_lower = key.lower()
-                if any(p in key_lower for p in _SENSITIVE_KEY_PARTS):
-                    val = section_data[key]
-                    if isinstance(val, str) and val:
-                        section_data[key] = f"{val[:3]}****"
-                    else:
-                        section_data[key] = "****"
-
-    jsonl_emit("diagnostics", data=all_sections, stage="agent_debug_env")
-
-
-agent_app.add_typer(agent_debug_app, name="debug", help="Debug diagnostics — crash dumps and environment snapshots")
-
-
-# ── agent cache clean — remove XDG cache directory contents ─────
-
-
-@agent_app.command("cache")
-def agent_cache(
-    action: str = typer.Argument("clean", help="Cache action (currently only 'clean' supported)"),
-) -> None:
-    """Clean the XDG cache directory.
-
-    Removes all files and subdirectories from ``<state_dir>/cache/``.
-    Outputs ``type=result`` JSONL with ``files_removed``, ``bytes_freed``
-    (human-readable), and ``cache_dir`` path.  If the cache dir does not
-    exist or is empty, outputs ``type=result`` with ``status=already_clean``.
-    """
-    import shutil
-
-    cache_dir = get_state_dir() / "cache"
-
-    if not cache_dir.exists():
-        jsonl_emit_result(
-            stage="agent_cache_clean",
-            status="already_clean",
-            files_removed=0,
-            bytes_freed="0 B",
-            cache_dir=str(cache_dir),
-        )
-        return
-
-    # Calculate total size before cleaning
-    total_bytes = 0
-    file_count = 0
-    for f in cache_dir.rglob("*"):
-        if f.is_file():
-            try:
-                total_bytes += f.stat().st_size
-                file_count += 1
-            except OSError:
-                pass
-
-    if file_count == 0:
-        jsonl_emit_result(
-            stage="agent_cache_clean",
-            status="already_clean",
-            files_removed=0,
-            bytes_freed="0 B",
-            cache_dir=str(cache_dir),
-        )
-        return
-
-    # Clean all contents
-    for item in cache_dir.iterdir():
-        try:
-            if item.is_dir():
-                shutil.rmtree(item)
-            else:
-                item.unlink()
-        except OSError:
-            pass
-
-    # Human-readable bytes
-    bytes_freed = _human_readable_bytes(total_bytes)
-
-    jsonl_emit_result(
-        stage="agent_cache_clean",
-        status="cleaned",
-        files_removed=file_count,
-        bytes_freed=bytes_freed,
-        cache_dir=str(cache_dir),
-    )
-
-
-def _human_readable_bytes(num_bytes: int) -> str:
-    """Convert bytes to human-readable string."""
-    for unit in ("B", "KB", "MB", "GB"):
-        if abs(num_bytes) < 1024:
-            return f"{num_bytes:.1f} {unit}" if unit != "B" else f"{num_bytes} {unit}"
-        num_bytes /= 1024  # type: ignore[assignment]
-    return f"{num_bytes:.1f} TB"
-
-
-# ── agent feature — record/list capability requests ──────────────
-
-agent_feature_app = typer.Typer(
-    name="feature",
-    add_completion=False,
-    invoke_without_command=True,
-    no_args_is_help=True,
-    help="Record and list feature/capability requests",
-)
-
-
-@agent_feature_app.command("record")
-def agent_feature_record(
-    name: str = typer.Option(..., "--name", "-n", help="Feature name"),
-    desc: str = typer.Option(..., "--desc", "-d", help="Feature description"),
-) -> None:
-    """Record a feature/capability request to state_dir/feature_requests.jsonl.
-
-    Each entry includes: id (uuid4 hex[:12]), name, description,
-    recorded_at (ISO 8601 UTC), tool_version.  Outputs type=result
-    JSONL with the recorded entry's id and file path.
-    """
-    from datetime import datetime, timezone
-
-    from web_clip_helper import __version__
-
-    if not name or not name.strip():
-        jsonl_emit_error(
-            stage="agent_feature_record",
-            detail="--name must be non-empty",
-            error_code="INPUT_INVALID",
-        )
-        raise typer.Exit(exit_code_for("INPUT_INVALID"))
-
-    if not desc or not desc.strip():
-        jsonl_emit_error(
-            stage="agent_feature_record",
-            detail="--desc must be non-empty",
-            error_code="INPUT_INVALID",
-        )
-        raise typer.Exit(exit_code_for("INPUT_INVALID"))
-
-    entry_id = uuid.uuid4().hex[:12]
-    entry = {
-        "id": entry_id,
-        "name": name.strip(),
-        "description": desc.strip(),
-        "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z",
-        "tool_version": __version__,
-    }
-
-    state_dir = get_state_dir()
-    feature_file = state_dir / "feature_requests.jsonl"
-
-    try:
-        state_dir.mkdir(parents=True, exist_ok=True)
-        with open(feature_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-        jsonl_emit_result(
-            stage="agent_feature_record",
-            id=entry_id,
-            file=str(feature_file),
-            status="recorded",
-        )
-    except OSError as exc:
-        jsonl_emit_error(
-            stage="agent_feature_record",
-            detail=f"Failed to write feature request: {exc}",
-            error_code="STORAGE_ERROR",
-        )
-        raise typer.Exit(exit_code_for("STORAGE_ERROR"))
-
-
-@agent_feature_app.command("list")
-def agent_feature_list() -> None:
-    """Read all feature request entries and output one type=dict JSONL line per entry.
-
-    If file doesn't exist or is empty, outputs type=result with total=0.
-    Entries sorted newest-first.
-    """
-    state_dir = get_state_dir()
-    feature_file = state_dir / "feature_requests.jsonl"
-
-    if not feature_file.exists():
-        jsonl_emit_result(
-            stage="agent_feature_list",
-            total=0,
-            detail="No feature requests file found",
-        )
-        return
-
-    entries: list[dict] = []
-    try:
-        for line in feature_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line:
-                entries.append(json.loads(line))
-    except (json.JSONDecodeError, OSError) as exc:
-        jsonl_emit_error(
-            stage="agent_feature_list",
-            detail=f"Failed to read feature requests: {exc}",
-            error_code="STORAGE_ERROR",
-        )
-        raise typer.Exit(exit_code_for("STORAGE_ERROR"))
-
-    if not entries:
-        jsonl_emit_result(
-            stage="agent_feature_list",
-            total=0,
-            detail="Feature requests file is empty",
-        )
-        return
-
-    # Output newest-first
-    for entry in reversed(entries):
-        jsonl_emit_dict(data=entry, stage="agent_feature_list")
-
-    jsonl_emit_result(
-        stage="agent_feature_list",
-        total=len(entries),
-    )
-
-
-agent_app.add_typer(agent_feature_app, name="feature", help="Record and list feature/capability requests")
-
-
-# ── agent metrics — trace crash dump by trace_id ─────────────────
-
-agent_metrics_app = typer.Typer(
-    name="metrics",
-    add_completion=False,
-    invoke_without_command=True,
-    no_args_is_help=True,
-    help="Metrics and tracing",
-)
-
-
-@agent_metrics_app.command("trace")
-def agent_metrics_trace(
-    id: str = typer.Option(..., "--id", help="Trace ID to search for in crash dumps"),
-) -> None:
-    """Search crash dump files for entries matching the given trace_id.
-
-    First checks .last-crash.json, then scans any other .json files
-    in the crash_dumps directory.  For each match, outputs type=dict
-    JSONL with the crash data.  If no matches found, outputs type=result
-    with status=not_found.
-    """
-    if not id or not id.strip():
-        jsonl_emit_error(
-            stage="agent_metrics_trace",
-            detail="--id must be non-empty",
-            error_code="INPUT_INVALID",
-        )
-        raise typer.Exit(exit_code_for("INPUT_INVALID"))
-
-    trace_id = id.strip()
-    crash_dir = get_crash_dumps_dir()
-    matches: list[dict] = []
-
-    # Check .last-crash.json first
-    last_crash = crash_dir / ".last-crash.json"
-    if last_crash.exists():
-        try:
-            data = json.loads(last_crash.read_text(encoding="utf-8"))
-            if data.get("trace_id") == trace_id:
-                matches.append(data)
-        except (json.JSONDecodeError, OSError):
-            pass
-
-    # Scan other .json files in crash_dumps directory
-    if crash_dir.exists():
-        for json_file in sorted(crash_dir.glob("*.json")):
-            if json_file.name == ".last-crash.json":
-                continue  # already checked
-            try:
-                data = json.loads(json_file.read_text(encoding="utf-8"))
-                # Could be a list of entries or a single dict
-                if isinstance(data, list):
-                    for entry in data:
-                        if isinstance(entry, dict) and entry.get("trace_id") == trace_id:
-                            matches.append(entry)
-                elif isinstance(data, dict) and data.get("trace_id") == trace_id:
-                    matches.append(data)
-            except (json.JSONDecodeError, OSError):
-                pass
-
-    if not matches:
-        jsonl_emit_result(
-            stage="agent_metrics_trace",
-            status="not_found",
-            trace_id=trace_id,
-            detail=f"No crash dumps found matching trace_id={trace_id}",
-        )
-        return
-
-    for match in matches:
-        jsonl_emit_dict(data=match, stage="agent_metrics_trace")
-
-
-agent_app.add_typer(agent_metrics_app, name="metrics", help="Metrics and tracing")
-
-
-# ── agent update apply — in-place upgrade ────────────────────────
-
-
-@agent_update_app.command("apply")
+@_agent_update_app.command(name="apply")
 def agent_update_apply(
     yes: bool = typer.Option(False, "--yes", "-y", help="Confirm upgrade without interactive prompt"),
 ) -> None:
@@ -1998,7 +1269,394 @@ def agent_update_apply(
         raise typer.Exit(exit_code_for("INTERNAL_ERROR"))
 
 
-app.add_typer(agent_app, name="agent", help="Agent reserved namespace — discovery and introspection")
+_agent_typer.add_typer(_agent_update_app, name="update", help="Check for updates")
+
+
+# ── Custom extension: agent auth ──────────────────────────────────
+
+
+_agent_auth_app = typer.Typer(
+    name="auth",
+    add_completion=False,
+    invoke_without_command=True,
+    no_args_is_help=True,
+    help="Authentication status checks",
+)
+
+
+@_agent_auth_app.command(name="status")
+def agent_auth_status() -> None:
+    """Check LLM API key validity via lightweight 1-token completion ping.
+
+    Outputs type=result JSONL with status (valid/invalid/not_configured),
+    masked key hint, and response latency.  Never outputs plaintext tokens.
+    """
+    import time
+
+    import httpx
+
+    from web_clip_helper.config import _mask_api_key, get_config
+
+    config = get_config()
+
+    if not config.llm.api_key or not config.llm.api_key.strip():
+        jsonl_emit_result(
+            stage="agent_auth_status",
+            status="not_configured",
+            masked_key="",
+            message="No API key configured",
+        )
+        return
+
+    masked_key = _mask_api_key(config.llm.api_key)
+    url = f"{config.llm.base_url.rstrip('/')}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {config.llm.api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": config.llm.model,
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 1,
+    }
+
+    start = time.monotonic()
+    try:
+        resp = httpx.post(url, json=payload, headers=headers, timeout=15.0)
+        elapsed_ms = (time.monotonic() - start) * 1000
+        resp.raise_for_status()
+        jsonl_emit_result(
+            stage="agent_auth_status",
+            status="valid",
+            masked_key=masked_key,
+            latency_ms=round(elapsed_ms, 2),
+        )
+    except Exception as exc:
+        elapsed_ms = (time.monotonic() - start) * 1000
+        jsonl_emit_result(
+            stage="agent_auth_status",
+            status="invalid",
+            masked_key=masked_key,
+            latency_ms=round(elapsed_ms, 2),
+            detail=str(exc),
+        )
+
+
+_agent_typer.add_typer(_agent_auth_app, name="auth", help="Authentication status checks")
+
+
+# ── Custom extension: agent debug-env ─────────────────────────────
+
+
+@_agent_typer.command("debug-env")
+def agent_debug_env(
+    redact: bool = typer.Option(True, "--redact/--no-redact", help="Force redaction of sensitive values"),
+) -> None:
+    """Collect and output an environment snapshot as type=result JSONL.
+
+    Includes Python version, OS details, tool version, directory paths,
+    LLM configuration (with api_key masked), dependency versions, and
+    environment variable indicators.
+    """
+    import platform
+
+    from web_clip_helper import __version__
+    from web_clip_helper.config import get_config
+
+    config = get_config()
+
+    # ── Python section ─────────────────────────────────────────
+    python_info: dict[str, str] = {
+        "version": platform.python_version(),
+        "implementation": platform.python_implementation(),
+    }
+
+    # ── OS section ─────────────────────────────────────────────
+    os_info: dict[str, str] = {
+        "name": os.name,
+        "platform": sys.platform,
+        "architecture": platform.machine(),
+    }
+
+    # ── Tool section ───────────────────────────────────────────
+    tool_info: dict[str, str] = {
+        "version": __version__,
+    }
+
+    # ── Directories section ────────────────────────────────────
+    dirs_info: dict[str, str] = {
+        "config_dir": str(get_config_dir()),
+        "data_dir": str(get_data_dir()),
+        "state_dir": str(get_state_dir()),
+    }
+
+    # ── LLM section (sensitive values masked) ──────────────────
+    llm_info: dict[str, str] = {
+        "base_url": config.llm.base_url,
+        "model": config.llm.model,
+        "api_key_set": "true" if config.llm.api_key else "false",
+    }
+    if config.llm.api_key:
+        from web_clip_helper.config import _mask_api_key
+
+        llm_info["api_key_hint"] = _mask_api_key(config.llm.api_key)
+
+    # ── Dependencies section ───────────────────────────────────
+    deps_info: dict[str, str] = {}
+    for dep_name in ("httpx", "typer", "readability", "markdownify", "platformdirs", "yaml"):
+        try:
+            if dep_name == "yaml":
+                import yaml
+
+                deps_info["yaml"] = yaml.__version__
+            elif dep_name == "readability":
+                import readability
+
+                deps_info["readability-lxml"] = getattr(readability, "__version__", "unknown")
+            else:
+                mod = __import__(dep_name)
+                deps_info[dep_name] = getattr(mod, "__version__", "unknown")
+        except ImportError:
+            deps_info[dep_name] = "not_installed"
+
+    # ── Environment indicators ─────────────────────────────────
+    env_indicators: dict[str, str] = {}
+    for var in ("WEB_CLIP_LLM_API_KEY", "WEB_CLIP_LLM_BASE_URL", "WEB_CLIP_LLM_MODEL", "AGENT_TRACE_ID"):
+        env_indicators[var] = "set" if os.environ.get(var) else "unset"
+
+    # ── Redaction pass (force-redact any sensitive values) ──────
+    all_sections: dict[str, dict[str, str]] = {
+        "python": python_info,
+        "os": os_info,
+        "tool": tool_info,
+        "directories": dirs_info,
+        "llm": llm_info,
+        "dependencies": deps_info,
+        "env_indicators": env_indicators,
+    }
+
+    if redact:
+        for section_data in all_sections.values():
+            for key in list(section_data.keys()):
+                key_lower = key.lower()
+                if any(p in key_lower for p in _SENSITIVE_KEY_PARTS):
+                    val = section_data[key]
+                    if isinstance(val, str) and val:
+                        section_data[key] = f"{val[:3]}****"
+                    else:
+                        section_data[key] = "****"
+
+    jsonl_emit_result(data=all_sections, stage="agent_debug_env")
+
+
+# ── Custom extension: agent feature ──────────────────────────────
+
+
+_agent_feature_app = typer.Typer(
+    name="feature",
+    add_completion=False,
+    invoke_without_command=True,
+    no_args_is_help=True,
+    help="Record and list feature/capability requests",
+)
+
+
+@_agent_feature_app.command("record")
+def agent_feature_record(
+    name: str = typer.Option(..., "--name", "-n", help="Feature name"),
+    desc: str = typer.Option(..., "--desc", "-d", help="Feature description"),
+) -> None:
+    """Record a feature/capability request to state_dir/feature_requests.jsonl.
+
+    Each entry includes: id (uuid4 hex[:12]), name, description,
+    recorded_at (ISO 8601 UTC), tool_version.  Outputs type=result
+    JSONL with the recorded entry's id and file path.
+    """
+    from datetime import datetime, timezone
+
+    from web_clip_helper import __version__
+
+    if not name or not name.strip():
+        jsonl_emit_error(
+            stage="agent_feature_record",
+            detail="--name must be non-empty",
+            error_code="INPUT_INVALID",
+        )
+        raise typer.Exit(exit_code_for("INPUT_INVALID"))
+
+    if not desc or not desc.strip():
+        jsonl_emit_error(
+            stage="agent_feature_record",
+            detail="--desc must be non-empty",
+            error_code="INPUT_INVALID",
+        )
+        raise typer.Exit(exit_code_for("INPUT_INVALID"))
+
+    entry_id = uuid.uuid4().hex[:12]
+    entry = {
+        "id": entry_id,
+        "name": name.strip(),
+        "description": desc.strip(),
+        "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z",
+        "tool_version": __version__,
+    }
+
+    state_dir = get_state_dir()
+    feature_file = state_dir / "feature_requests.jsonl"
+
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        with open(feature_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        jsonl_emit_result(
+            stage="agent_feature_record",
+            id=entry_id,
+            file=str(feature_file),
+            status="recorded",
+        )
+    except OSError as exc:
+        jsonl_emit_error(
+            stage="agent_feature_record",
+            detail=f"Failed to write feature request: {exc}",
+            error_code="STORAGE_ERROR",
+        )
+        raise typer.Exit(exit_code_for("STORAGE_ERROR"))
+
+
+@_agent_feature_app.command("list")
+def agent_feature_list() -> None:
+    """Read all feature request entries and output one type=dict JSONL line per entry.
+
+    If file doesn't exist or is empty, outputs type=result with total=0.
+    Entries sorted newest-first.
+    """
+    state_dir = get_state_dir()
+    feature_file = state_dir / "feature_requests.jsonl"
+
+    if not feature_file.exists():
+        jsonl_emit_result(
+            stage="agent_feature_list",
+            total=0,
+            detail="No feature requests file found",
+        )
+        return
+
+    entries: list[dict] = []
+    try:
+        for line in feature_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                entries.append(json.loads(line))
+    except (json.JSONDecodeError, OSError) as exc:
+        jsonl_emit_error(
+            stage="agent_feature_list",
+            detail=f"Failed to read feature requests: {exc}",
+            error_code="STORAGE_ERROR",
+        )
+        raise typer.Exit(exit_code_for("STORAGE_ERROR"))
+
+    if not entries:
+        jsonl_emit_result(
+            stage="agent_feature_list",
+            total=0,
+            detail="Feature requests file is empty",
+        )
+        return
+
+    # Output newest-first
+    for entry in reversed(entries):
+        jsonl_emit_dict(data=entry, stage="agent_feature_list")
+
+    jsonl_emit_result(
+        stage="agent_feature_list",
+        total=len(entries),
+    )
+
+
+_agent_typer.add_typer(_agent_feature_app, name="feature", help="Record and list feature/capability requests")
+
+
+# ── Custom extension: agent metrics ──────────────────────────────
+
+
+_agent_metrics_app = typer.Typer(
+    name="metrics",
+    add_completion=False,
+    invoke_without_command=True,
+    no_args_is_help=True,
+    help="Metrics and tracing",
+)
+
+
+@_agent_metrics_app.command("trace")
+def agent_metrics_trace(
+    id: str = typer.Option(..., "--id", help="Trace ID to search for in crash dumps"),
+) -> None:
+    """Search crash dump files for entries matching the given trace_id.
+
+    First checks .last-crash.json, then scans any other .json files
+    in the crash_dumps directory.  For each match, outputs type=dict
+    JSONL with the crash data.  If no matches found, outputs type=result
+    with status=not_found.
+    """
+    if not id or not id.strip():
+        jsonl_emit_error(
+            stage="agent_metrics_trace",
+            detail="--id must be non-empty",
+            error_code="INPUT_INVALID",
+        )
+        raise typer.Exit(exit_code_for("INPUT_INVALID"))
+
+    trace_id = id.strip()
+    crash_dir = get_crash_dumps_dir()
+    matches: list[dict] = []
+
+    # Check .last-crash.json first
+    last_crash = crash_dir / ".last-crash.json"
+    if last_crash.exists():
+        try:
+            data = json.loads(last_crash.read_text(encoding="utf-8"))
+            if data.get("trace_id") == trace_id:
+                matches.append(data)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Scan other .json files in crash_dumps directory
+    if crash_dir.exists():
+        for json_file in sorted(crash_dir.glob("*.json")):
+            if json_file.name == ".last-crash.json":
+                continue  # already checked
+            try:
+                data = json.loads(json_file.read_text(encoding="utf-8"))
+                # Could be a list of entries or a single dict
+                if isinstance(data, list):
+                    for entry in data:
+                        if isinstance(entry, dict) and entry.get("trace_id") == trace_id:
+                            matches.append(entry)
+                elif isinstance(data, dict) and data.get("trace_id") == trace_id:
+                    matches.append(data)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    if not matches:
+        jsonl_emit_result(
+            stage="agent_metrics_trace",
+            status="not_found",
+            trace_id=trace_id,
+            detail=f"No crash dumps found matching trace_id={trace_id}",
+        )
+        return
+
+    for match in matches:
+        jsonl_emit_dict(data=match, stage="agent_metrics_trace")
+
+
+_agent_typer.add_typer(_agent_metrics_app, name="metrics", help="Metrics and tracing")
+
+# Register agent namespace on main app
+app.add_typer(_agent_typer, name="agent", help="Agent reserved namespace — discovery, health, introspection, and runtime management")
+
 
 
 @app.command(name="version")
