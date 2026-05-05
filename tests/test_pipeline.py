@@ -23,14 +23,19 @@ import web_clip_helper.adapters._registry  # noqa: F401
 
 @pytest.fixture(autouse=True)
 def _reset_app():
-    """Reset SDK App singleton and install a Writer targeting a StringIO buffer."""
-    import web_clip_helper.app as mod
-    mod._app = None
+    """Swap SDK Writer with a fresh StringIO buffer between tests.
+
+    NEVER null _app. SDK command closures in cli.py capture the App
+    at import time and write to its Writer. If we replace the App,
+    those closures break silently. Instead we swap the Writer on the
+    existing App and restore it after.
+    """
     app = get_app()
+    old_writer = app.writer
     _writer_buf = io.StringIO()
     app.set_writer(Writer(_writer_buf, tool_name="web-clip-helper"))
     yield
-    mod._app = None
+    app.set_writer(old_writer)
 
 
 @pytest.fixture

@@ -394,26 +394,41 @@ class TestAgentConfigSetAllWhitelistedPaths:
 
 
 class TestAgentDebugLastCrashNoFile:
-    """When no crash dump file exists."""
+    """When no crash dump file exists.
+
+    Uses the real sandbox crash_dumps dir because SDK command closures
+    capture app.sandbox at import time — patching get_crash_dumps_dir
+    has no effect. We move any existing .json files aside and restore
+    them after.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _ensure_no_crash_files(self):
+        from web_clip_helper.app import get_crash_dumps_dir
+        crash_dir = get_crash_dumps_dir()
+        crash_dir.mkdir(parents=True, exist_ok=True)
+        # Move existing .json files aside
+        json_files = list(crash_dir.glob("*.json"))
+        held = []
+        for f in json_files:
+            backup = f.with_suffix(".json.bak")
+            f.rename(backup)
+            held.append((f, backup))
+        yield
+        # Restore
+        for orig, backup in held:
+            if backup.exists():
+                backup.rename(orig)
 
     def test_no_crash_exits_error(self, run_sdk_cli) -> None:
-        """No crash dir returns NOT_FOUND error (exit 1)."""
-        with patch("web_clip_helper.app.get_crash_dumps_dir") as mock_dir:
-            import tempfile
-            with tempfile.TemporaryDirectory() as td:
-                mock_dir.return_value = Path(td) / "crash_dumps"
-                mock_dir.return_value.mkdir(parents=True, exist_ok=True)
-                code, envelopes = _run_and_capture(["agent", "debug-last-crash"], run_sdk_cli)
-                assert code >= 1
+        """No crash files returns NOT_FOUND error (exit >= 1)."""
+        code, envelopes = _run_and_capture(["agent", "debug-last-crash"], run_sdk_cli)
+        assert code >= 1
 
     def test_no_crash_is_not_found(self, run_sdk_cli) -> None:
-        with patch("web_clip_helper.app.get_crash_dumps_dir") as mock_dir:
-            import tempfile
-            with tempfile.TemporaryDirectory() as td:
-                mock_dir.return_value = Path(td) / "crash_dumps"
-                mock_dir.return_value.mkdir(parents=True, exist_ok=True)
-                code, envelopes = _run_and_capture(["agent", "debug-last-crash"], run_sdk_cli)
-                assert any(e["type"] == "error" and e.get("error_code") == "NOT_FOUND" for e in envelopes)
+        """No crash files returns NOT_FOUND error_code in JSONL."""
+        code, envelopes = _run_and_capture(["agent", "debug-last-crash"], run_sdk_cli)
+        assert any(e["type"] == "error" and e.get("error_code") == "NOT_FOUND" for e in envelopes)
 
 
 class TestAgentDebugLastCrashWithFile:
