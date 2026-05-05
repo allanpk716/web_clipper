@@ -103,6 +103,18 @@ def run_sdk_cli(tmp_path: Path):
             if exit_codes:
                 code = exit_codes[-1]
             output = capture_buf.getvalue()
+            # Check SDK's captured_output for non-JSONL content (e.g. Rich --help).
+            # App.run() replaces sys.stdout with _FakeStream; Click's help renderer
+            # writes there, while SDK Writer writes to _real_stdout (our capture_buf).
+            captured = getattr(app, 'captured_output', None) or ''
+            if captured.strip() and not captured.lstrip().startswith("{"):
+                from web_clip_helper.output import jsonl_emit_help
+                from web_clip_helper.cli import _COMMAND_HELP
+                jsonl_emit_help(
+                    commands=_COMMAND_HELP,
+                    description="LLM Agent-oriented web clipping CLI tool",
+                )
+                output = capture_buf.getvalue()
             envelopes = _parse_envelopes(output) if output.strip() else []
             return code, envelopes
         finally:

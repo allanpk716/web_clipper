@@ -24,13 +24,6 @@ from web_clip_helper.pipeline import clip_url
 import web_clip_helper.adapters._registry  # noqa: F401
 
 
-def _capture_jsonl(capsys):
-    """Parse captured stdout as JSONL lines."""
-    output = capsys.readouterr().out
-    lines = [line for line in output.strip().split("\n") if line.strip()]
-    return [json.loads(line) for line in lines]
-
-
 @pytest.fixture
 def config(tmp_path: Path) -> Config:
     """Return a Config pointing at temp directories."""
@@ -76,7 +69,7 @@ class TestDuplicateDetection:
         mock_dl: MagicMock,
         config: Config,
         sample_raw: RawContent,
-        capsys,
+        _capture_jsonl,
     ) -> None:
         from web_clip_helper.adapters.github import GitHubAdapter
 
@@ -94,13 +87,14 @@ class TestDuplicateDetection:
         result2 = clip_url("https://github.com/psf/requests", config)
         assert result2 is not None
 
-        messages = _capture_jsonl(capsys)
-        result_msgs = [m for m in messages if m["type"] == "result"]
+        envelopes = _capture_jsonl()
+        result_envs = [e for e in envelopes if e["type"] == "result"]
 
-        # Second clip result should have duplicate: true
-        second_result = result_msgs[-1]
-        assert second_result.get("duplicate") is True
-        assert second_result.get("existing_id") == result1.record_id
+        # Second clip result should have duplicate: true in data
+        second_result = result_envs[-1]
+        data = second_result.get("data", {})
+        assert data.get("duplicate") is True
+        assert data.get("existing_id") == result1.record_id
 
     @patch("web_clip_helper.services.clip.download_images")
     @patch("web_clip_helper.services.clip.route_url")
@@ -184,7 +178,7 @@ class TestDuplicateDetection:
         mock_dl: MagicMock,
         config: Config,
         sample_raw: RawContent,
-        capsys,
+        _capture_jsonl,
     ) -> None:
         from web_clip_helper.adapters.github import GitHubAdapter
 
@@ -194,16 +188,17 @@ class TestDuplicateDetection:
         with patch.object(GitHubAdapter, "fetch", return_value=sample_raw):
             clip_url("https://github.com/psf/requests", config)
 
-        # Clear captured output
-        capsys.readouterr()
+        # Consume output from first clip
+        _capture_jsonl()
 
         clip_url("https://github.com/psf/requests", config)
 
-        messages = _capture_jsonl(capsys)
-        progress_msgs = [m for m in messages if m["type"] == "progress"]
-        progress_texts = [m["message"] for m in progress_msgs]
+        envelopes = _capture_jsonl()
+        progress_envs = [e for e in envelopes if e["type"] == "progress"]
+        progress_messages = [e.get("message", "") for e in progress_envs]
 
-        assert "Duplicate URL detected" in progress_texts
+        assert any("Duplicate" in msg or "duplicate" in msg for msg in progress_messages), \
+            f"Expected duplicate progress message, got: {progress_messages}"
 
 
 class TestCrossNormalization:

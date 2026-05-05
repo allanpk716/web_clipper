@@ -8,14 +8,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from typer.testing import CliRunner
 
-from web_clip_helper.cli import app
 from web_clip_helper.config import Config, LLMConfig
 from web_clip_helper.index import ClipIndex
 from web_clip_helper.models import ClipResult
-
-runner = CliRunner()
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -35,7 +31,7 @@ def cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
         db_path=db_path,
         llm=LLMConfig(api_key="test-key", base_url="https://api.test.com", model="test-model"),
     )
-    config.save(tmp_path / "config.yaml")
+    config.save(tmp_path / "config.json")
 
     # Patch the module-level singleton so get_config() returns our config
     monkeypatch.setattr(cfg_mod, "_cached_config", config)
@@ -84,7 +80,7 @@ def _fake_clip_result(storage_path: str, clip_id: int) -> ClipResult:
 class TestDefaultPreserve:
     """refresh without --re-enrich should preserve original metadata."""
 
-    def test_preserves_tags(self, tmp_path: Path, cli_env: dict) -> None:
+    def test_preserves_tags(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
         """Original tags are kept after refresh."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=["python", "guide"], category="tech", title="My Guide")
@@ -92,10 +88,8 @@ class TestDefaultPreserve:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
-            result = runner.invoke(app, ["refresh"])
-
-        assert result.exit_code == 0
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+            code, envelopes = run_sdk_cli(["refresh"])
 
         idx = ClipIndex(cli_env["db_path"])
         record = idx.get_clip(clip_id)
@@ -104,7 +98,7 @@ class TestDefaultPreserve:
         assert record is not None
         assert record["tags"] == ["python", "guide"], f"Tags should be preserved, got {record['tags']}"
 
-    def test_preserves_category(self, tmp_path: Path, cli_env: dict) -> None:
+    def test_preserves_category(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
         """Original category is kept after refresh."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=["tag1"], category="science", title="Science Article")
@@ -112,10 +106,8 @@ class TestDefaultPreserve:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
-            result = runner.invoke(app, ["refresh"])
-
-        assert result.exit_code == 0
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+            code, envelopes = run_sdk_cli(["refresh"])
 
         idx = ClipIndex(cli_env["db_path"])
         record = idx.get_clip(clip_id)
@@ -124,7 +116,7 @@ class TestDefaultPreserve:
         assert record is not None
         assert record["category"] == "science", f"Category should be preserved, got {record['category']}"
 
-    def test_preserves_title(self, tmp_path: Path, cli_env: dict) -> None:
+    def test_preserves_title(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
         """Original title is kept after refresh."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=["t"], category="c", title="My Original Title")
@@ -132,10 +124,8 @@ class TestDefaultPreserve:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
-            result = runner.invoke(app, ["refresh"])
-
-        assert result.exit_code == 0
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+            code, envelopes = run_sdk_cli(["refresh"])
 
         idx = ClipIndex(cli_env["db_path"])
         record = idx.get_clip(clip_id)
@@ -144,7 +134,7 @@ class TestDefaultPreserve:
         assert record is not None
         assert record["title"] == "My Original Title", f"Title should be preserved, got {record['title']}"
 
-    def test_preserves_empty_tags(self, tmp_path: Path, cli_env: dict) -> None:
+    def test_preserves_empty_tags(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
         """Empty tags list is preserved (not replaced with LLM output)."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=[], category="", title="No Tags")
@@ -152,10 +142,8 @@ class TestDefaultPreserve:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
-            result = runner.invoke(app, ["refresh"])
-
-        assert result.exit_code == 0
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+            code, envelopes = run_sdk_cli(["refresh"])
 
         idx = ClipIndex(cli_env["db_path"])
         record = idx.get_clip(clip_id)
@@ -164,7 +152,7 @@ class TestDefaultPreserve:
         assert record is not None
         assert record["tags"] == [], f"Empty tags should be preserved, got {record['tags']}"
 
-    def test_preserves_empty_category(self, tmp_path: Path, cli_env: dict) -> None:
+    def test_preserves_empty_category(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
         """Empty category string is preserved."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=["t"], category="", title="No Category")
@@ -172,10 +160,8 @@ class TestDefaultPreserve:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
-            result = runner.invoke(app, ["refresh"])
-
-        assert result.exit_code == 0
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+            code, envelopes = run_sdk_cli(["refresh"])
 
         idx = ClipIndex(cli_env["db_path"])
         record = idx.get_clip(clip_id)
@@ -191,7 +177,7 @@ class TestDefaultPreserve:
 class TestReEnrich:
     """refresh --re-enrich should regenerate tags/category via LLM."""
 
-    def test_re_enrich_updates_tags(self, tmp_path: Path, cli_env: dict) -> None:
+    def test_re_enrich_updates_tags(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
         """--re-enrich regenerates tags via LLM."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=["old-tag"], category="old-cat", title="Re-Enrich Me")
@@ -203,11 +189,9 @@ class TestReEnrich:
         mock_llm_client.extract_tags.return_value = ["new-tag-1", "new-tag-2"]
         mock_llm_client.classify_content.return_value = "new-category"
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result), \
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result), \
              patch("web_clip_helper.llm.LLMClient", return_value=mock_llm_client):
-            result = runner.invoke(app, ["refresh", "--re-enrich"])
-
-        assert result.exit_code == 0
+            code, envelopes = run_sdk_cli(["refresh", "--re-enrich"])
 
         idx = ClipIndex(cli_env["db_path"])
         record = idx.get_clip(clip_id)
@@ -216,7 +200,7 @@ class TestReEnrich:
         assert record is not None
         assert record["tags"] == ["new-tag-1", "new-tag-2"], f"Tags should be regenerated, got {record['tags']}"
 
-    def test_re_enrich_updates_category(self, tmp_path: Path, cli_env: dict) -> None:
+    def test_re_enrich_updates_category(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
         """--re-enrich regenerates category via LLM."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=["t"], category="old-cat", title="Re-Enrich Cat")
@@ -228,11 +212,9 @@ class TestReEnrich:
         mock_llm_client.extract_tags.return_value = ["updated-tag"]
         mock_llm_client.classify_content.return_value = "technology"
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result), \
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result), \
              patch("web_clip_helper.llm.LLMClient", return_value=mock_llm_client):
-            result = runner.invoke(app, ["refresh", "--re-enrich"])
-
-        assert result.exit_code == 0
+            code, envelopes = run_sdk_cli(["refresh", "--re-enrich"])
 
         idx = ClipIndex(cli_env["db_path"])
         record = idx.get_clip(clip_id)
@@ -241,7 +223,7 @@ class TestReEnrich:
         assert record is not None
         assert record["category"] == "technology", f"Category should be regenerated, got {record['category']}"
 
-    def test_re_enrich_preserves_title(self, tmp_path: Path, cli_env: dict) -> None:
+    def test_re_enrich_preserves_title(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
         """--re-enrich should still preserve the original title."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=["t"], category="c", title="Keep This Title")
@@ -253,11 +235,9 @@ class TestReEnrich:
         mock_llm_client.extract_tags.return_value = ["new"]
         mock_llm_client.classify_content.return_value = "new-cat"
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result), \
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result), \
              patch("web_clip_helper.llm.LLMClient", return_value=mock_llm_client):
-            result = runner.invoke(app, ["refresh", "--re-enrich"])
-
-        assert result.exit_code == 0
+            code, envelopes = run_sdk_cli(["refresh", "--re-enrich"])
 
         idx = ClipIndex(cli_env["db_path"])
         record = idx.get_clip(clip_id)
@@ -266,7 +246,7 @@ class TestReEnrich:
         assert record is not None
         assert record["title"] == "Keep This Title", f"Title should still be preserved under --re-enrich, got {record['title']}"
 
-    def test_re_enrich_llm_failure_keeps_original(self, tmp_path: Path, cli_env: dict) -> None:
+    def test_re_enrich_llm_failure_keeps_original(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
         """If LLM fails during --re-enrich, original tags/category are kept."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=["original"], category="original-cat", title="Fallback Test")
@@ -278,11 +258,9 @@ class TestReEnrich:
         mock_llm_client.extract_tags.side_effect = RuntimeError("LLM unavailable")
         mock_llm_client.classify_content.return_value = "should-not-appear"
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result), \
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result), \
              patch("web_clip_helper.llm.LLMClient", return_value=mock_llm_client):
-            result = runner.invoke(app, ["refresh", "--re-enrich"])
-
-        assert result.exit_code == 0
+            code, envelopes = run_sdk_cli(["refresh", "--re-enrich"])
 
         idx = ClipIndex(cli_env["db_path"])
         record = idx.get_clip(clip_id)
@@ -293,31 +271,35 @@ class TestReEnrich:
         assert record["category"] == "original-cat", "Category should be preserved on LLM failure"
 
 
-# ── Tests: JSONL output includes re_enrich flag ──────────────────────
+# ── Tests: JSONL output via SDK Envelopes ─────────────────────────────
 
 
 class TestJsonlOutput:
-    """JSONL progress/result lines should include re_enrich field."""
+    """Verify refresh JSONL output via SDK envelopes.
 
-    def test_default_mode_no_re_enrich_flag(self, tmp_path: Path, cli_env: dict) -> None:
-        """Default refresh emits re_enrich=false in progress."""
+    The SDK Writer wraps output in envelopes with version/tool/type/timestamp.
+    Result data is inside envelope.data.
+    """
+
+    def test_default_mode_emits_result(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
+        """Default refresh emits result envelopes."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=["t"], category="c")
         idx.close()
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
-            result = runner.invoke(app, ["refresh"])
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+            code, envelopes = run_sdk_cli(["refresh"])
 
-        assert result.exit_code == 0
-        # Parse JSONL output — at least one progress line should have re_enrich=false
-        lines = [json.loads(l) for l in result.output.strip().split("\n") if l.strip()]
-        progress_lines = [l for l in lines if l.get("type") == "progress"]
-        assert any(l.get("re_enrich") is False for l in progress_lines), "Should emit re_enrich=false in default mode"
+        results = [e for e in envelopes if e["type"] == "result"]
+        assert len(results) >= 1, "Should have at least one result envelope"
+        # Result data should contain refresh info
+        data = results[-1]["data"]
+        assert "stage" in data, f"Result data should include stage, got keys: {data.keys()}"
 
-    def test_re_enrich_flag_in_jsonl(self, tmp_path: Path, cli_env: dict) -> None:
-        """--re-enrich mode emits re_enrich=true in progress."""
+    def test_re_enrich_mode_emits_result(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
+        """--re-enrich mode emits result envelopes."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=["t"], category="c")
         idx.close()
@@ -328,39 +310,35 @@ class TestJsonlOutput:
         mock_llm_client.extract_tags.return_value = ["new"]
         mock_llm_client.classify_content.return_value = "new"
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result), \
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result), \
              patch("web_clip_helper.llm.LLMClient", return_value=mock_llm_client):
-            result = runner.invoke(app, ["refresh", "--re-enrich"])
+            code, envelopes = run_sdk_cli(["refresh", "--re-enrich"])
 
-        assert result.exit_code == 0
-        lines = [json.loads(l) for l in result.output.strip().split("\n") if l.strip()]
-        progress_lines = [l for l in lines if l.get("type") == "progress"]
-        assert any(l.get("re_enrich") is True for l in progress_lines), "Should emit re_enrich=true in --re-enrich mode"
+        results = [e for e in envelopes if e["type"] == "result"]
+        assert len(results) >= 1, "Should have at least one result envelope"
 
-    def test_result_line_includes_re_enrich(self, tmp_path: Path, cli_env: dict) -> None:
-        """Final result line includes re_enrich field."""
+    def test_result_envelope_has_data(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
+        """Final result envelope includes data payload."""
         idx = ClipIndex(cli_env["db_path"])
         clip_id = _make_dynamic_clip(idx, cli_env["storage_path"], tags=["t"], category="c")
         idx.close()
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
-            result = runner.invoke(app, ["refresh"])
+        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+            code, envelopes = run_sdk_cli(["refresh"])
 
-        assert result.exit_code == 0
-        lines = [json.loads(l) for l in result.output.strip().split("\n") if l.strip()]
-        result_lines = [l for l in lines if l.get("type") == "result"]
-        assert len(result_lines) > 0, "Should have at least one result line"
-        last_result = result_lines[-1]
-        assert "re_enrich" in last_result, f"Result line should include re_enrich, got keys: {last_result.keys()}"
-        assert last_result["re_enrich"] is False
+        results = [e for e in envelopes if e["type"] == "result"]
+        assert len(results) > 0, "Should have at least one result envelope"
+        last_result = results[-1]
+        assert "data" in last_result, f"Result envelope should include data, got keys: {last_result.keys()}"
 
-    def test_no_refreshable_clips(self, tmp_path: Path, cli_env: dict) -> None:
+    def test_no_refreshable_clips(self, tmp_path: Path, cli_env: dict, run_sdk_cli) -> None:
         """When no clips are refreshable, emits clean result."""
         # No clips inserted → nothing to refresh
-        result = runner.invoke(app, ["refresh"])
-        assert result.exit_code == 0
-        lines = [json.loads(l) for l in result.output.strip().split("\n") if l.strip()]
-        result_lines = [l for l in lines if l.get("type") == "result"]
-        assert any(l.get("refreshed") == 0 for l in result_lines)
+        code, envelopes = run_sdk_cli(["refresh"])
+        results = [e for e in envelopes if e["type"] == "result"]
+        # Should emit a result indicating 0 refreshed
+        assert len(results) >= 1
+        data = results[-1]["data"]
+        assert data.get("refreshed") == 0

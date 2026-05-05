@@ -80,14 +80,50 @@ def _drain_buffer(buf) -> list[dict]:
     return [json.loads(l) for l in lines]
 
 
-def _run_and_capture(args: list[str]) -> tuple[Any, list[dict]]:
-    """Invoke CLI via CliRunner and capture JSONL from SDK Writer's buffer."""
-    set_quiet(False)
-    buf = _get_writer_buffer()
-    buf.truncate(0)
-    buf.seek(0)
-    result = runner.invoke(app, args)
-    msgs = _drain_buffer(buf)
+class _RunResult:
+    """Minimal CliRunner-like result object wrapping (exit_code, output, envelopes)."""
+    def __init__(self, exit_code: int, output: str, envelopes: list[dict]):
+        self.exit_code = exit_code
+        self.output = output
+        self._envelopes = envelopes
+
+
+def _run_and_capture(args: list[str]) -> tuple[_RunResult, list[dict]]:
+    """Invoke CLI via App.run() and capture JSONL from SDK Writer.
+
+    Uses App.run() (the real entry point) instead of CliRunner because
+    App.run() manages stdout hijacking, Writer lifecycle, and signal handlers.
+    """
+    from web_clip_helper.app import get_app
+
+    sdk_app = get_app()
+    sdk_app.writer.set_quiet(False)
+
+    capture_buf = io.StringIO()
+    saved_real_stdout = sdk_app._real_stdout
+    sdk_app._real_stdout = capture_buf
+    saved_stdout = sys.stdout
+    sys.stdout = capture_buf
+
+    old_exit = sys.exit
+    exit_codes: list[int] = []
+    sys.exit = lambda code=0: exit_codes.append(code)  # type: ignore[assignment]
+
+    try:
+        code = sdk_app.run(app, args=args)
+        if exit_codes:
+            code = exit_codes[-1]
+    except SystemExit as e:
+        code = e.code if isinstance(e.code, int) else 0
+    finally:
+        sdk_app._real_stdout = saved_real_stdout
+        sys.stdout = saved_stdout
+        sys.exit = old_exit
+
+    output = capture_buf.getvalue()
+    lines = [ln for ln in output.strip().split("\n") if ln.strip()]
+    msgs = [json.loads(ln) for ln in lines]
+    result = _RunResult(code, output, msgs)
     return result, msgs
 
 
@@ -473,16 +509,16 @@ class TestJSONLPurity:
         _validate_jsonl_types(msgs)
 
     def test_result_like_types_only_result(self):
-        """The _RESULT_LIKE_TYPES set should contain only 'result'."""
+        """The _RESULT_LIKE_TYPES set should contain result and its aliases."""
         from web_clip_helper.output import _RESULT_LIKE_TYPES
-        assert _RESULT_LIKE_TYPES == frozenset({"result"})
+        assert _RESULT_LIKE_TYPES == frozenset({"result", "help", "schema", "dict"})
 
     def test_invalid_type_raises_valueerror(self):
         """Passing a non-standard type to jsonl_emit raises ValueError."""
         from web_clip_helper.output import jsonl_emit
 
         with pytest.raises(ValueError, match="Invalid JSONL type"):
-            jsonl_emit("schema", data={"foo": "bar"})
+            jsonl_emit("bogus_type", data={"foo": "bar"})
 
     def test_help_wrapper_emits_result_type(self):
         """jsonl_emit_help emits type=result, not type=help."""

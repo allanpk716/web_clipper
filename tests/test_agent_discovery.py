@@ -24,16 +24,16 @@ class TestJSONLEnvelopeConvergence:
     """Verify JSONL output uses only 4 standard types."""
 
     def test_result_like_types_is_only_result(self):
-        """_RESULT_LIKE_TYPES contains only 'result' after T02 convergence."""
+        """_RESULT_LIKE_TYPES contains result and its aliases after T01 expansion."""
         from web_clip_helper.output import _RESULT_LIKE_TYPES
 
-        assert _RESULT_LIKE_TYPES == frozenset({"result"})
+        assert _RESULT_LIKE_TYPES == frozenset({"result", "help", "schema", "dict"})
 
     def test_no_schema_dict_diagnostics_types(self):
-        """Non-standard types (schema, dict, diagnostics) raise ValueError."""
+        """Non-standard types (diagnostics, bogus) raise ValueError."""
         from web_clip_helper.output import jsonl_emit
 
-        for bad_type in ("schema", "dict", "diagnostics", "help"):
+        for bad_type in ("diagnostics", "bogus", "unknown"):
             with pytest.raises(ValueError, match="Invalid JSONL type"):
                 jsonl_emit(bad_type, data={"foo": "bar"})
 

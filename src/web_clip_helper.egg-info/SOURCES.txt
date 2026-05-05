@@ -6,11 +6,9 @@ src/web_clip_helper/adapter.py
 src/web_clip_helper/app.py
 src/web_clip_helper/cli.py
 src/web_clip_helper/config.py
-src/web_clip_helper/crash.py
 src/web_clip_helper/error_codes.py
 src/web_clip_helper/images.py
 src/web_clip_helper/index.py
-src/web_clip_helper/io_guard.py
 src/web_clip_helper/llm.py
 src/web_clip_helper/migration.py
 src/web_clip_helper/models.py
@@ -27,12 +25,20 @@ src/web_clip_helper.egg-info/top_level.txt
 src/web_clip_helper/adapters/__init__.py
 src/web_clip_helper/adapters/_registry.py
 src/web_clip_helper/adapters/arxiv.py
+src/web_clip_helper/adapters/base.py
 src/web_clip_helper/adapters/generic.py
 src/web_clip_helper/adapters/github.py
 src/web_clip_helper/adapters/wechat.py
 src/web_clip_helper/adapters/weibo.py
 src/web_clip_helper/adapters/weibo_card.py
 src/web_clip_helper/adapters/weibo_headline.py
+src/web_clip_helper/repository/__init__.py
+src/web_clip_helper/repository/index.py
+src/web_clip_helper/repository/storage.py
+src/web_clip_helper/services/__init__.py
+src/web_clip_helper/services/clip.py
+src/web_clip_helper/services/images.py
+src/web_clip_helper/services/llm.py
 tests/test_adapter.py
 tests/test_agent_commands.py
 tests/test_agent_discovery.py
@@ -43,7 +49,6 @@ tests/test_clip_text.py
 tests/test_commands.py
 tests/test_config.py
 tests/test_config_cli.py
-tests/test_crash.py
 tests/test_delete_command.py
 tests/test_dry_run.py
 tests/test_dynamic_flag.py
@@ -54,7 +59,6 @@ tests/test_field_migration.py
 tests/test_get_content.py
 tests/test_images.py
 tests/test_index.py
-tests/test_io_guard.py
 tests/test_jsonl_linter.py
 tests/test_llm.py
 tests/test_llm_missing_warning.py
@@ -73,7 +77,6 @@ tests/test_sdk_output_bridge.py
 tests/test_search_fulltext.py
 tests/test_storage.py
 tests/test_subcommand_help.py
-tests/test_trace_id.py
 tests/test_typer_exception_interception.py
 tests/test_update_command.py
 tests/test_url_utils.py

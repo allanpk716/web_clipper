@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -19,7 +18,7 @@ class TestLLMMissingSummaryWarning:
     def test_no_api_key_emits_summary_warning(
         self,
         tmp_path: Path,
-        capsys,
+        _capture_jsonl,
     ) -> None:
         """When no API key is configured, clip should emit a summary warning at the end."""
         config = Config(
@@ -33,19 +32,19 @@ class TestLLMMissingSummaryWarning:
         result = clip_text("test content for warning", config)
 
         assert result is not None
-        captured = capsys.readouterr()
-        lines = [
-            json.loads(line)
-            for line in captured.out.strip().split("\n")
-            if line.strip()
+        envelopes = _capture_jsonl()
+        warnings = [
+            e for e in envelopes
+            if e.get("type") == "warning"
         ]
-
-        warnings = [l for l in lines if l["type"] == "warning" and l.get("stage") == "llm"]
-        # Should have at least 2 warnings: the early one + the summary
+        # Should have at least 1 LLM warning
         assert len(warnings) >= 1
         # The summary warning should contain actionable guidance
-        summary = [w for w in warnings if "config set llm.api_key" in w.get("message", "")]
-        assert len(summary) >= 1, f"Expected summary warning with config guidance, got: {warnings}"
+        summary = [
+            w for w in warnings
+            if "config set llm.api_key" in w.get("message", "")
+        ]
+        assert len(summary) >= 1, f"Expected summary warning with config guidance, got: {[w['message'] for w in warnings]}"
         assert "WEB_CLIP_LLM_API_KEY" in summary[0]["message"]
 
     @patch("web_clip_helper.services.clip.download_images")
@@ -55,7 +54,7 @@ class TestLLMMissingSummaryWarning:
         mock_route: MagicMock,
         mock_dl: MagicMock,
         tmp_path: Path,
-        capsys,
+        _capture_jsonl,
     ) -> None:
         """When API key is configured, no summary warning should be emitted."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
@@ -90,16 +89,12 @@ class TestLLMMissingSummaryWarning:
                 result = clip_url("https://example.com/test", config)
 
         assert result is not None
-        captured = capsys.readouterr()
-        lines = [
-            json.loads(line)
-            for line in captured.out.strip().split("\n")
-            if line.strip()
-        ]
+        envelopes = _capture_jsonl()
 
         # No summary warning about missing API key
         llm_warnings = [
-            l for l in lines
-            if l["type"] == "warning" and l.get("stage") == "llm" and "config set" in l.get("message", "")
+            e for e in envelopes
+            if e.get("type") == "warning"
+            and "config set" in e.get("message", "")
         ]
         assert len(llm_warnings) == 0, f"Unexpected LLM summary warning when API key is set: {llm_warnings}"

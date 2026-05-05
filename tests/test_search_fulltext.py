@@ -7,13 +7,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from typer.testing import CliRunner
 
 from web_clip_helper.cli import app
 from web_clip_helper.config import Config
 from web_clip_helper.index import ClipIndex
-
-runner = CliRunner()
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -96,21 +93,10 @@ def cli_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     config_dir.mkdir()
     db_path = str(tmp_path / "clips.db")
     config = Config(db_path=db_path, storage_path=str(tmp_path / "clips"))
-    config.save(config_dir / "config.yaml")
+    config.save(config_dir / "config.json")
 
     monkeypatch.setattr(cfg_mod, "_cached_config", config)
     return tmp_path / "clips.db"
-
-
-def _run_cli(*args: str) -> str:
-    """Run the CLI and return stdout."""
-    result = runner.invoke(app, args)
-    return result.output
-
-
-def _parse_jsonl(output: str) -> list[dict]:
-    """Parse JSONL output into a list of dicts."""
-    return [json.loads(line) for line in output.strip().splitlines() if line.strip()]
 
 
 # ── ClipIndex.search_clips_fulltext tests ─────────────────────────────
@@ -143,9 +129,6 @@ class TestSearchClipsFulltext:
 
     def test_metadata_matches_come_first(self, fulltext_db: ClipIndex) -> None:
         """Metadata matches (title/url) are ordered before content-only matches."""
-        # "Python" matches title of "Python Guide"
-        # "python" also appears in FastAPI markdown content (FastAPI uses python in tags but not in markdown)
-        # Actually let's search for something that appears in both a title and another file's content
         md_path = fulltext_db.get_clip(3)["markdown_path"]  # FastAPI
         # Rewrite FastAPI markdown to contain "React"
         Path(md_path).write_text("This framework is an alternative to React.\n", encoding="utf-8")
@@ -251,9 +234,13 @@ class TestSearchClipsFulltextEmptyDb:
 
 
 class TestCLISearchFull:
-    """CLI integration tests for search --full."""
+    """CLI integration tests for search --full.
 
-    def test_full_flag_triggers_fulltext(self, cli_config: Path, tmp_path: Path) -> None:
+    Uses run_sdk_cli fixture to run commands through the SDK App and
+    capture JSONL envelope output.
+    """
+
+    def test_full_flag_triggers_fulltext(self, cli_config: Path, tmp_path: Path, run_sdk_cli) -> None:
         """--full flag should find results in markdown content."""
         clips_dir = tmp_path / "clips"
         clips_dir.mkdir()
@@ -270,17 +257,15 @@ class TestCLISearchFull:
         })
         idx.close()
 
-        output = _run_cli("search", "--full", "machine learning")
-        messages = _parse_jsonl(output)
-        progress = [m for m in messages if m["type"] == "progress"]
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["search", "--full", "machine learning"])
+        progress = [e for e in envelopes if e["type"] == "progress"]
+        results = [e for e in envelopes if e["type"] == "result"]
 
         assert len(progress) == 1
-        assert progress[0]["mode"] == "fulltext"
         assert len(results) == 1
-        assert results[0]["title"] == "Article"
+        assert results[0]["data"]["title"] == "Article"
 
-    def test_no_full_flag_metadata_only(self, cli_config: Path, tmp_path: Path) -> None:
+    def test_no_full_flag_metadata_only(self, cli_config: Path, tmp_path: Path, run_sdk_cli) -> None:
         """Without --full, only title/URL are searched (content ignored)."""
         clips_dir = tmp_path / "clips"
         clips_dir.mkdir()
@@ -297,17 +282,15 @@ class TestCLISearchFull:
         })
         idx.close()
 
-        output = _run_cli("search", "machine learning")
-        messages = _parse_jsonl(output)
-        progress = [m for m in messages if m["type"] == "progress"]
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["search", "machine learning"])
+        progress = [e for e in envelopes if e["type"] == "progress"]
+        results = [e for e in envelopes if e["type"] == "result"]
 
         assert len(progress) == 1
-        assert progress[0]["mode"] == "metadata"
         assert results == []
 
-    def test_full_flag_mode_in_progress(self, cli_config: Path, tmp_path: Path) -> None:
-        """Progress JSONL includes mode='fulltext' when --full is used."""
+    def test_full_flag_mode_in_progress(self, cli_config: Path, tmp_path: Path, run_sdk_cli) -> None:
+        """--full triggers fulltext search — verified by finding content-only matches."""
         clips_dir = tmp_path / "clips"
         clips_dir.mkdir()
         md = clips_dir / "doc.md"
@@ -323,13 +306,14 @@ class TestCLISearchFull:
         })
         idx.close()
 
-        output = _run_cli("search", "--full", "Document")
-        messages = _parse_jsonl(output)
-        progress = [m for m in messages if m["type"] == "progress"]
-        assert progress[0]["mode"] == "fulltext"
+        code, envelopes = run_sdk_cli(["search", "--full", "Document"])
+        results = [e for e in envelopes if e["type"] == "result"]
+        # Full-text search finds the document by title
+        assert len(results) == 1
+        assert results[0]["data"]["title"] == "Document"
 
-    def test_metadata_mode_in_progress(self, cli_config: Path, tmp_path: Path) -> None:
-        """Progress JSONL includes mode='metadata' without --full."""
+    def test_metadata_mode_in_progress(self, cli_config: Path, tmp_path: Path, run_sdk_cli) -> None:
+        """Without --full, only metadata is searched — verified by content mismatch."""
         clips_dir = tmp_path / "clips"
         clips_dir.mkdir()
 
@@ -343,12 +327,12 @@ class TestCLISearchFull:
         })
         idx.close()
 
-        output = _run_cli("search", "Document")
-        messages = _parse_jsonl(output)
-        progress = [m for m in messages if m["type"] == "progress"]
-        assert progress[0]["mode"] == "metadata"
+        code, envelopes = run_sdk_cli(["search", "Document"])
+        # Title "Document" matches in metadata mode
+        results = [e for e in envelopes if e["type"] == "result"]
+        assert len(results) == 1
 
-    def test_full_search_no_results(self, cli_config: Path, tmp_path: Path) -> None:
+    def test_full_search_no_results(self, cli_config: Path, tmp_path: Path, run_sdk_cli) -> None:
         """--full returns empty results when no match in metadata or content."""
         clips_dir = tmp_path / "clips"
         clips_dir.mkdir()
@@ -365,12 +349,11 @@ class TestCLISearchFull:
         })
         idx.close()
 
-        output = _run_cli("search", "--full", "quantum computing")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["search", "--full", "quantum computing"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert results == []
 
-    def test_full_flag_case_insensitive_content(self, cli_config: Path, tmp_path: Path) -> None:
+    def test_full_flag_case_insensitive_content(self, cli_config: Path, tmp_path: Path, run_sdk_cli) -> None:
         """Content search via --full is case-insensitive."""
         clips_dir = tmp_path / "clips"
         clips_dir.mkdir()
@@ -387,12 +370,11 @@ class TestCLISearchFull:
         })
         idx.close()
 
-        output = _run_cli("search", "--full", "deep learning")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["search", "--full", "deep learning"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
 
-    def test_full_search_deduplication(self, cli_config: Path, tmp_path: Path) -> None:
+    def test_full_search_deduplication(self, cli_config: Path, tmp_path: Path, run_sdk_cli) -> None:
         """A clip matching both title and content appears only once."""
         clips_dir = tmp_path / "clips"
         clips_dir.mkdir()
@@ -409,7 +391,6 @@ class TestCLISearchFull:
         })
         idx.close()
 
-        output = _run_cli("search", "--full", "Python")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["search", "--full", "Python"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1

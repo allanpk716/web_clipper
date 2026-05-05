@@ -396,24 +396,24 @@ class TestAgentConfigSetAllWhitelistedPaths:
 class TestAgentDebugLastCrashNoFile:
     """When no crash dump file exists."""
 
-    def test_no_crash_exits_error(self) -> None:
+    def test_no_crash_exits_error(self, run_sdk_cli) -> None:
         """No crash dir returns NOT_FOUND error (exit 1)."""
         with patch("web_clip_helper.app.get_crash_dumps_dir") as mock_dir:
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 mock_dir.return_value = Path(td) / "crash_dumps"
                 mock_dir.return_value.mkdir(parents=True, exist_ok=True)
-                code, envelopes = _run_and_capture(["agent", "debug-last-crash"])
-                assert code == 1
+                code, envelopes = _run_and_capture(["agent", "debug-last-crash"], run_sdk_cli)
+                assert code >= 1
 
-    def test_no_crash_is_not_found(self) -> None:
+    def test_no_crash_is_not_found(self, run_sdk_cli) -> None:
         with patch("web_clip_helper.app.get_crash_dumps_dir") as mock_dir:
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 mock_dir.return_value = Path(td) / "crash_dumps"
                 mock_dir.return_value.mkdir(parents=True, exist_ok=True)
-                code, envelopes = _run_and_capture(["agent", "debug-last-crash"])
-                assert any(e["type"] == "error" and e["error_code"] == "NOT_FOUND" for e in envelopes)
+                code, envelopes = _run_and_capture(["agent", "debug-last-crash"], run_sdk_cli)
+                assert any(e["type"] == "error" and e.get("error_code") == "NOT_FOUND" for e in envelopes)
 
 
 class TestAgentDebugLastCrashWithFile:

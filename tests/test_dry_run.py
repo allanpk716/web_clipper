@@ -4,6 +4,8 @@ Verifies that --dry-run:
   - Returns a structured ExecutionPlan as JSONL with dry_run=True
   - Performs NO network fetch, filesystem writes, or SQLite writes
   - Handles URL routing, text input, and error paths correctly
+
+Uses run_sdk_cli for CLI tests and _capture_jsonl for direct pipeline tests.
 """
 
 from __future__ import annotations
@@ -14,17 +16,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from typer.testing import CliRunner
 
-from web_clip_helper.cli import app
 from web_clip_helper.config import Config
 from web_clip_helper.index import ClipIndex
 from web_clip_helper.models import RawContent
 
 # Trigger adapter registration
 import web_clip_helper.adapters._registry  # noqa: F401
-
-runner = CliRunner()
 
 
 @pytest.fixture
@@ -36,26 +34,28 @@ def config(tmp_path: Path) -> Config:
     )
 
 
-def _run_clip(*args: str) -> tuple[int, str]:
-    """Run the clip command and return (exit_code, stdout)."""
-    result = runner.invoke(app, ["clip", *args])
-    return result.exit_code, result.output
+@pytest.fixture
+def cli_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
+    """Return a Config pointing at temp directories, patched into get_config."""
+    import web_clip_helper.config as cfg_mod
+
+    cfg = Config(
+        storage_path=str(tmp_path / "clips"),
+        db_path=str(tmp_path / "test.db"),
+    )
+    config_dir = tmp_path / "cfg"
+    config_dir.mkdir()
+    cfg.save(config_dir / "config.json")
+    monkeypatch.setattr(cfg_mod, "_cached_config", cfg)
+    return cfg
 
 
-def _parse_jsonl(output: str) -> list[dict]:
-    """Parse stdout as JSONL lines, return list of dicts."""
-    lines = [line for line in output.strip().split("\n") if line.strip()]
-    return [json.loads(line) for line in lines]
-
-
-def _validate_all_jsonl(output: str) -> list[dict]:
-    """Validate every stdout line is valid JSONL with whitelisted type."""
-    parsed = _parse_jsonl(output)
-    valid_types = {"progress", "result", "error", "warning", "help"}
-    for line in parsed:
-        assert "type" in line, f"Missing 'type' field in JSONL: {line}"
-        assert line["type"] in valid_types, f"Invalid type: {line['type']} in {line}"
-    return parsed
+def _unwrap_result_data(envelope: dict) -> dict:
+    """Return the data payload from a result-type envelope."""
+    assert envelope.get("type") == "result", (
+        f"Expected result envelope, got type={envelope.get('type')!r}"
+    )
+    return envelope["data"]
 
 
 # ── URL dry-run tests ──────────────────────────────────────────────
@@ -65,23 +65,21 @@ class TestDryRunURL:
     """Tests for --dry-run with URL input."""
 
     @patch("web_clip_helper.services.clip.route_url")
-    def test_dry_run_url_returns_plan(self, mock_route: MagicMock, config: Config) -> None:
+    def test_dry_run_url_returns_plan(self, mock_route: MagicMock, cli_config: Config, run_sdk_cli) -> None:
         """--dry-run with URL emits a result with dry_run=True and plan dict."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
 
         mock_route.return_value = GenericWebAdapter
 
-        with patch("web_clip_helper.config.get_config", return_value=config):
-            exit_code, output = _run_clip("--dry-run", "https://example.com/article")
+        code, envelopes = run_sdk_cli(["clip", "--dry-run", "https://example.com/article"])
 
-        parsed = _validate_all_jsonl(output)
-        results = [p for p in parsed if p["type"] == "result"]
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
 
-        result = results[0]
-        assert result.get("dry_run") is True
-        assert "plan" in result
-        plan = result["plan"]
+        data = _unwrap_result_data(results[0])
+        assert data.get("dry_run") is True
+        assert "plan" in data
+        plan = data["plan"]
         assert plan["adapter"] == "GenericWebAdapter"
         assert plan["source_type"] == "web"
         assert plan["duplicate"] is False
@@ -89,33 +87,32 @@ class TestDryRunURL:
         assert len(plan["estimated_actions"]) > 0
 
     @patch("web_clip_helper.services.clip.route_url")
-    def test_dry_run_url_no_real_io(self, mock_route: MagicMock, config: Config) -> None:
+    def test_dry_run_url_no_real_io(self, mock_route: MagicMock, cli_config: Config, run_sdk_cli) -> None:
         """--dry-run must NOT call adapter.fetch, StorageManager, or ClipIndex.save_clip."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
 
         mock_route.return_value = GenericWebAdapter
 
         with (
-            patch("web_clip_helper.config.get_config", return_value=config),
             patch("web_clip_helper.services.clip.StorageManager") as mock_storage,
             patch("web_clip_helper.services.clip.LLMClient") as mock_llm,
             patch("web_clip_helper.services.clip.download_images") as mock_dl,
         ):
-            _run_clip("--dry-run", "https://example.com/article")
+            run_sdk_cli(["clip", "--dry-run", "https://example.com/article"])
 
             mock_storage.assert_not_called()
             mock_llm.assert_not_called()
             mock_dl.assert_not_called()
 
     @patch("web_clip_helper.services.clip.route_url")
-    def test_dry_run_url_detects_duplicate(self, mock_route: MagicMock, config: Config) -> None:
+    def test_dry_run_url_detects_duplicate(self, mock_route: MagicMock, cli_config: Config, tmp_path: Path, run_sdk_cli) -> None:
         """--dry-run detects existing URL in the index (read-only check)."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
 
         mock_route.return_value = GenericWebAdapter
 
         # Insert a record so the duplicate check finds it
-        idx = ClipIndex(config.db_path)
+        idx = ClipIndex(cli_config.db_path)
         idx.save_clip({
             "url": "https://example.com/article",
             "title": "Test",
@@ -128,27 +125,23 @@ class TestDryRunURL:
         })
         idx.close()
 
-        with patch("web_clip_helper.config.get_config", return_value=config):
-            exit_code, output = _run_clip("--dry-run", "https://example.com/article")
+        code, envelopes = run_sdk_cli(["clip", "--dry-run", "https://example.com/article"])
 
-        parsed = _validate_all_jsonl(output)
-        results = [p for p in parsed if p["type"] == "result"]
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
 
-        plan = results[0]["plan"]
+        data = _unwrap_result_data(results[0])
+        plan = data["plan"]
         assert plan["duplicate"] is True
         assert plan["existing_id"] is not None
 
-    def test_dry_run_url_routing_error(self, config: Config) -> None:
+    def test_dry_run_url_routing_error(self, cli_config: Config, run_sdk_cli) -> None:
         """--dry-run emits error JSONL on routing failure (empty URL)."""
-        # route_url raises ValueError on empty string
-        with patch("web_clip_helper.config.get_config", return_value=config):
-            # Passing just --dry-run with no URL and no text triggers INPUT_INVALID first
-            exit_code, output = _run_clip("--dry-run")
-            parsed = _validate_all_jsonl(output)
-            errors = [p for p in parsed if p["type"] == "error"]
-            assert len(errors) == 1
-            assert errors[0].get("error_code") == "INPUT_INVALID"
+        # Passing just --dry-run with no URL and no text triggers INPUT_INVALID first
+        code, envelopes = run_sdk_cli(["clip", "--dry-run"])
+        errors = [e for e in envelopes if e["type"] == "error"]
+        assert len(errors) == 1
+        assert errors[0].get("error_code") == "INPUT_INVALID"
 
 
 # ── Text dry-run tests ──────────────────────────────────────────────
@@ -157,101 +150,90 @@ class TestDryRunURL:
 class TestDryRunText:
     """Tests for --dry-run with text input."""
 
-    def test_dry_run_text_returns_plan(self, config: Config) -> None:
+    def test_dry_run_text_returns_plan(self, cli_config: Config, run_sdk_cli) -> None:
         """--dry-run with text emits a result with dry_run=True and text plan."""
-        with patch("web_clip_helper.config.get_config", return_value=config):
-            exit_code, output = _run_clip("--dry-run", "--text", "Hello world this is a test")
+        code, envelopes = run_sdk_cli(["clip", "--dry-run", "--text", "Hello world this is a test"])
 
-        parsed = _validate_all_jsonl(output)
-        results = [p for p in parsed if p["type"] == "result"]
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
 
-        result = results[0]
-        assert result.get("dry_run") is True
-        assert "plan" in result
-        plan = result["plan"]
+        data = _unwrap_result_data(results[0])
+        assert data.get("dry_run") is True
+        assert "plan" in data
+        plan = data["plan"]
         assert plan["source_type"] == "text"
         assert plan["duplicate"] is False
         assert plan["existing_id"] is None
         assert "estimated_title" in plan
         assert isinstance(plan["estimated_actions"], list)
 
-    def test_dry_run_text_no_real_io(self, config: Config) -> None:
+    def test_dry_run_text_no_real_io(self, cli_config: Config, run_sdk_cli) -> None:
         """--dry-run text must NOT call StorageManager, LLMClient, or download_images."""
         with (
-            patch("web_clip_helper.config.get_config", return_value=config),
             patch("web_clip_helper.services.clip.StorageManager") as mock_storage,
             patch("web_clip_helper.services.clip.LLMClient") as mock_llm,
             patch("web_clip_helper.services.clip.download_images") as mock_dl,
         ):
-            _run_clip("--dry-run", "--text", "Some text content")
+            run_sdk_cli(["clip", "--dry-run", "--text", "Some text content"])
 
             mock_storage.assert_not_called()
             mock_llm.assert_not_called()
             mock_dl.assert_not_called()
 
-    def test_dry_run_text_empty_input(self, config: Config) -> None:
+    def test_dry_run_text_empty_input(self, cli_config: Config, run_sdk_cli) -> None:
         """--dry-run with empty text emits INPUT_INVALID error."""
-        with patch("web_clip_helper.config.get_config", return_value=config):
-            exit_code, output = _run_clip("--dry-run", "--text", "")
+        code, envelopes = run_sdk_cli(["clip", "--dry-run", "--text", ""])
 
-        parsed = _validate_all_jsonl(output)
-        errors = [p for p in parsed if p["type"] == "error"]
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert len(errors) == 1
         assert errors[0].get("error_code") == "INPUT_INVALID"
 
-    def test_dry_run_text_title_truncation(self, config: Config) -> None:
+    def test_dry_run_text_title_truncation(self, cli_config: Config, run_sdk_cli) -> None:
         """--dry-run text truncates title to first 50 characters."""
         long_text = "A" * 100
-        with patch("web_clip_helper.config.get_config", return_value=config):
-            exit_code, output = _run_clip("--dry-run", "--text", long_text)
+        code, envelopes = run_sdk_cli(["clip", "--dry-run", "--text", long_text])
 
-        parsed = _validate_all_jsonl(output)
-        results = [p for p in parsed if p["type"] == "result"]
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
-        plan = results[0]["plan"]
-        assert len(plan["estimated_title"]) == 50
+        data = _unwrap_result_data(results[0])
+        assert len(data["plan"]["estimated_title"]) == 50
 
 
 # ── JSONL purity tests ──────────────────────────────────────────────
 
 
 class TestDryRunJSONLPurity:
-    """Verify all dry-run output is valid JSONL."""
+    """Verify all dry-run output is valid SDK Envelope JSONL."""
 
     @patch("web_clip_helper.services.clip.route_url")
-    def test_dry_run_url_all_lines_valid_jsonl(self, mock_route: MagicMock, config: Config) -> None:
-        """Every stdout line from --dry-run URL is valid JSON."""
+    def test_dry_run_url_all_lines_valid_jsonl(self, mock_route: MagicMock, cli_config: Config, run_sdk_cli) -> None:
+        """Every stdout line from --dry-run URL is a valid SDK envelope."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
 
         mock_route.return_value = GenericWebAdapter
 
-        with patch("web_clip_helper.config.get_config", return_value=config):
-            exit_code, output = _run_clip("--dry-run", "https://github.com/psf/requests")
+        code, envelopes = run_sdk_cli(["clip", "--dry-run", "https://github.com/psf/requests"])
 
-        parsed = _validate_all_jsonl(output)
-        assert len(parsed) >= 2  # At least progress + result
+        # All envelopes are parsed and validated by _parse_envelopes in conftest
+        assert len(envelopes) >= 2  # At least progress + result
 
-    def test_dry_run_text_all_lines_valid_jsonl(self, config: Config) -> None:
-        """Every stdout line from --dry-run text is valid JSON."""
-        with patch("web_clip_helper.config.get_config", return_value=config):
-            exit_code, output = _run_clip("--dry-run", "--text", "Sample text")
+    def test_dry_run_text_all_lines_valid_jsonl(self, cli_config: Config, run_sdk_cli) -> None:
+        """Every stdout line from --dry-run text is a valid SDK envelope."""
+        code, envelopes = run_sdk_cli(["clip", "--dry-run", "--text", "Sample text"])
 
-        parsed = _validate_all_jsonl(output)
-        assert len(parsed) >= 2  # At least progress + result
+        # All envelopes are parsed and validated by _parse_envelopes in conftest
+        assert len(envelopes) >= 2  # At least progress + result
 
     @patch("web_clip_helper.services.clip.route_url")
-    def test_dry_run_result_has_envelope_fields(self, mock_route: MagicMock, config: Config) -> None:
+    def test_dry_run_result_has_envelope_fields(self, mock_route: MagicMock, cli_config: Config, run_sdk_cli) -> None:
         """Result lines include version, tool, and timestamp envelope fields."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
 
         mock_route.return_value = GenericWebAdapter
 
-        with patch("web_clip_helper.config.get_config", return_value=config):
-            exit_code, output = _run_clip("--dry-run", "https://example.com/page")
+        code, envelopes = run_sdk_cli(["clip", "--dry-run", "https://example.com/page"])
 
-        parsed = _validate_all_jsonl(output)
-        results = [p for p in parsed if p["type"] == "result"]
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
 
         result = results[0]
@@ -265,10 +247,13 @@ class TestDryRunJSONLPurity:
 
 
 class TestPlanFunctions:
-    """Tests for plan_clip_url and plan_clip_text functions directly."""
+    """Tests for plan_clip_url and plan_clip_text functions directly.
+
+    Uses _capture_jsonl fixture to capture SDK Writer output.
+    """
 
     @patch("web_clip_helper.services.clip.route_url")
-    def test_plan_clip_url_emits_plan(self, mock_route: MagicMock, config: Config, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_plan_clip_url_emits_plan(self, mock_route: MagicMock, config: Config, _capture_jsonl) -> None:
         """plan_clip_url emits JSONL result with dry_run=True."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
         from web_clip_helper.pipeline import plan_clip_url
@@ -277,25 +262,25 @@ class TestPlanFunctions:
 
         plan_clip_url("https://example.com/test", config)
 
-        captured = capsys.readouterr()
-        parsed = _validate_all_jsonl(captured.out)
-        results = [p for p in parsed if p["type"] == "result"]
+        envelopes = _capture_jsonl()
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
-        assert results[0]["dry_run"] is True
-        assert results[0]["plan"]["adapter"] == "GenericWebAdapter"
+        data = _unwrap_result_data(results[0])
+        assert data["dry_run"] is True
+        assert data["plan"]["adapter"] == "GenericWebAdapter"
 
-    def test_plan_clip_text_emits_plan(self, config: Config, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_plan_clip_text_emits_plan(self, config: Config, _capture_jsonl) -> None:
         """plan_clip_text emits JSONL result with dry_run=True."""
         from web_clip_helper.pipeline import plan_clip_text
 
         plan_clip_text("Hello world", config)
 
-        captured = capsys.readouterr()
-        parsed = _validate_all_jsonl(captured.out)
-        results = [p for p in parsed if p["type"] == "result"]
+        envelopes = _capture_jsonl()
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
-        assert results[0]["dry_run"] is True
-        assert results[0]["plan"]["source_type"] == "text"
+        data = _unwrap_result_data(results[0])
+        assert data["dry_run"] is True
+        assert data["plan"]["source_type"] == "text"
 
     def test_plan_clip_text_empty_raises(self, config: Config) -> None:
         """plan_clip_text raises SystemExit on empty input."""
@@ -315,7 +300,7 @@ class TestPlanFunctions:
             plan_clip_url("invalid-url", config)
 
     @patch("web_clip_helper.services.clip.route_url")
-    def test_plan_clip_url_duplicate_check_failure_non_fatal(self, mock_route: MagicMock, config: Config, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_plan_clip_url_duplicate_check_failure_non_fatal(self, mock_route: MagicMock, config: Config, _capture_jsonl) -> None:
         """Duplicate check failure in plan_clip_url is non-fatal."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
         from web_clip_helper.pipeline import plan_clip_url
@@ -325,11 +310,11 @@ class TestPlanFunctions:
         with patch("web_clip_helper.services.clip.ClipIndex", side_effect=Exception("DB error")):
             plan_clip_url("https://example.com/test", config)
 
-        captured = capsys.readouterr()
-        parsed = _validate_all_jsonl(captured.out)
-        results = [p for p in parsed if p["type"] == "result"]
+        envelopes = _capture_jsonl()
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
-        assert results[0]["plan"]["duplicate"] is False
+        data = _unwrap_result_data(results[0])
+        assert data["plan"]["duplicate"] is False
 
 
 # ── No-side-effects tests ───────────────────────────────────────────
@@ -339,30 +324,28 @@ class TestNoSideEffects:
     """Verify dry-run produces no side effects (no files, no DB records)."""
 
     @patch("web_clip_helper.services.clip.route_url")
-    def test_dry_run_creates_no_storage_files(self, mock_route: MagicMock, config: Config, tmp_path: Path) -> None:
+    def test_dry_run_creates_no_storage_files(self, mock_route: MagicMock, cli_config: Config, tmp_path: Path, run_sdk_cli) -> None:
         """--dry-run does not create any files in storage_path."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
 
         mock_route.return_value = GenericWebAdapter
 
-        with patch("web_clip_helper.config.get_config", return_value=config):
-            _run_clip("--dry-run", "https://example.com/test")
+        run_sdk_cli(["clip", "--dry-run", "https://example.com/test"])
 
         storage_dir = tmp_path / "clips"
         if storage_dir.exists():
             assert not any(storage_dir.iterdir()), "dry-run should not create storage files"
 
     @patch("web_clip_helper.services.clip.route_url")
-    def test_dry_run_creates_no_db_records(self, mock_route: MagicMock, config: Config) -> None:
+    def test_dry_run_creates_no_db_records(self, mock_route: MagicMock, cli_config: Config, run_sdk_cli) -> None:
         """--dry-run does not create any records in SQLite."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
 
         mock_route.return_value = GenericWebAdapter
 
-        with patch("web_clip_helper.config.get_config", return_value=config):
-            _run_clip("--dry-run", "https://example.com/test")
+        run_sdk_cli(["clip", "--dry-run", "https://example.com/test"])
 
-        idx = ClipIndex(config.db_path)
+        idx = ClipIndex(cli_config.db_path)
         clips = idx.query_clips()
         idx.close()
         assert len(clips) == 0, "dry-run should not create DB records"
