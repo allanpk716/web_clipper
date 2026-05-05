@@ -21,6 +21,8 @@ Requires-Dist: readability-lxml>=0.8.1
 Requires-Dist: markdownify>=0.11.0
 Requires-Dist: pyyaml>=6.0
 Requires-Dist: openai>=1.0.0
+Requires-Dist: platformdirs>=3.0
+Requires-Dist: agentsdk @ git+https://github.com/allanpk716/ai-agent-cli-rules.git#subdirectory=sdks/python
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0; extra == "dev"
 Requires-Dist: pytest-cov>=4.0; extra == "dev"

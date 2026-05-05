@@ -29,5 +29,5 @@ def tmp_config_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def tmp_config_path(tmp_config_dir: Path) -> Path:
-    """Return a path to a temporary config.yaml."""
-    return tmp_config_dir / "config.yaml"
+    """Return a path to a temporary config.json."""
+    return tmp_config_dir / "config.json"

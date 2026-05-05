@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 import pytest
-import yaml
 
 from web_clip_helper.config import (
     Config,
@@ -21,7 +21,7 @@ class TestConfigDefaults:
     """Config has sensible defaults even without a file."""
 
     def test_defaults_used(self, tmp_config_dir: Path) -> None:
-        cfg = Config.load(tmp_config_dir / "nonexistent.yaml")
+        cfg = Config.load(tmp_config_dir / "nonexistent.json")
         assert "clips" in cfg.storage_path
         assert "clips.db" in cfg.db_path
         assert cfg.llm.api_key == ""
@@ -38,21 +38,21 @@ class TestConfigAutoCreate:
         Config.load(tmp_config_path)
         assert tmp_config_path.exists()
 
-    def test_created_file_is_valid_yaml(self, tmp_config_path: Path) -> None:
+    def test_created_file_is_valid_json(self, tmp_config_path: Path) -> None:
         Config.load(tmp_config_path)
         with open(tmp_config_path) as fh:
-            data = yaml.safe_load(fh)
+            data = json.loads(fh.read())
         assert isinstance(data, dict)
         assert "storage_path" in data
         assert "db_path" in data
 
 
 class TestConfigLoad:
-    """Config loads values from YAML correctly."""
+    """Config loads values from JSON correctly."""
 
     def test_loads_custom_storage_path(self, tmp_config_path: Path) -> None:
         tmp_config_path.write_text(
-            yaml.dump({"storage_path": "/custom/clips", "db_path": "/custom/clips.db"})
+            json.dumps({"storage_path": "/custom/clips", "db_path": "/custom/clips.db"})
         )
         cfg = Config.load(tmp_config_path)
         assert cfg.storage_path == "/custom/clips"
@@ -60,7 +60,7 @@ class TestConfigLoad:
 
     def test_loads_llm_config(self, tmp_config_path: Path) -> None:
         tmp_config_path.write_text(
-            yaml.dump({"llm": {"api_key": "sk-test", "model": "gpt-4"}})
+            json.dumps({"llm": {"api_key": "sk-test", "model": "gpt-4"}})
         )
         cfg = Config.load(tmp_config_path)
         assert cfg.llm.api_key == "sk-test"
@@ -68,17 +68,17 @@ class TestConfigLoad:
 
     def test_loads_refresh_config(self, tmp_config_path: Path) -> None:
         tmp_config_path.write_text(
-            yaml.dump({"refresh": {"default_interval_days": 30}})
+            json.dumps({"refresh": {"default_interval_days": 30}})
         )
         cfg = Config.load(tmp_config_path)
         assert cfg.refresh.default_interval_days == 30
 
 
 class TestConfigMalformed:
-    """Config handles malformed YAML gracefully."""
+    """Config handles malformed JSON gracefully."""
 
-    def test_malformed_yaml_uses_defaults(self, tmp_config_path: Path) -> None:
-        tmp_config_path.write_text("{{{{invalid yaml::::")
+    def test_malformed_json_uses_defaults(self, tmp_config_path: Path) -> None:
+        tmp_config_path.write_text("{{{{invalid json::::")
         cfg = Config.load(tmp_config_path)
         # Should fall back to defaults
         assert "clips" in cfg.storage_path
@@ -90,7 +90,7 @@ class TestConfigMalformed:
         assert cfg.llm.api_key == ""
 
     def test_partial_config_merges_defaults(self, tmp_config_path: Path) -> None:
-        tmp_config_path.write_text(yaml.dump({"storage_path": "/my/path"}))
+        tmp_config_path.write_text(json.dumps({"storage_path": "/my/path"}))
         cfg = Config.load(tmp_config_path)
         assert cfg.storage_path == "/my/path"
         # Other fields should be defaults
@@ -102,12 +102,12 @@ class TestConfigNotWritable:
 
     def test_nonexistent_nested_dir(self, tmp_path: Path) -> None:
         """Should still succeed — mkdir(parents=True) handles this."""
-        cfg_path = tmp_path / "deep" / "nested" / "config.yaml"
+        cfg_path = tmp_path / "deep" / "nested" / "config.json"
         cfg = Config.load(cfg_path)
         assert cfg_path.exists()
 
     def test_save_creates_dir(self, tmp_path: Path) -> None:
-        cfg_path = tmp_path / "new_dir" / "config.yaml"
+        cfg_path = tmp_path / "new_dir" / "config.json"
         cfg = Config()
         cfg.save(cfg_path)
         assert cfg_path.exists()
@@ -117,11 +117,11 @@ class TestConfigNotWritable:
 
 
 class TestEnvVarOverride:
-    """Environment variables override YAML values for LLM settings."""
+    """Environment variables override file values for LLM settings."""
 
     def test_api_key_override(self, tmp_config_path: Path) -> None:
         tmp_config_path.write_text(
-            yaml.dump({"llm": {"api_key": "from-yaml"}})
+            json.dumps({"llm": {"api_key": "from-file"}})
         )
         os.environ["WEB_CLIP_LLM_API_KEY"] = "from-env"
         try:
@@ -148,20 +148,20 @@ class TestEnvVarOverride:
 
     def test_no_override_when_env_not_set(self, tmp_config_path: Path) -> None:
         tmp_config_path.write_text(
-            yaml.dump({"llm": {"api_key": "yaml-value"}})
+            json.dumps({"llm": {"api_key": "file-value"}})
         )
         # Ensure env vars are not set
         for var in ("WEB_CLIP_LLM_API_KEY", "WEB_CLIP_LLM_BASE_URL", "WEB_CLIP_LLM_MODEL"):
             os.environ.pop(var, None)
         cfg = Config.load(tmp_config_path)
-        assert cfg.llm.api_key == "yaml-value"
+        assert cfg.llm.api_key == "file-value"
 
 
 # ── Dot-path get/set tests ──────────────────────────────────────────
 
 
 class TestDotPathGet:
-    """get_by_path navigates dataclass fields with dot-separated paths."""
+    """get_by_path navigates Pydantic model fields with dot-separated paths."""
 
     def test_top_level_field(self) -> None:
         cfg = Config()
@@ -251,9 +251,9 @@ class TestPromptConfig:
         assert cfg.prompts.tags == ""
         assert cfg.prompts.classify == ""
 
-    def test_prompts_loaded_from_yaml(self, tmp_config_path: Path) -> None:
+    def test_prompts_loaded_from_json(self, tmp_config_path: Path) -> None:
         tmp_config_path.write_text(
-            yaml.dump({
+            json.dumps({
                 "prompts": {"title": "summarize", "tags": "extract", "classify": "categorize"}
             })
         )

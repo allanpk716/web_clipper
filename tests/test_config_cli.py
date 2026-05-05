@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 import pytest
-import yaml
 from typer.testing import CliRunner
 
 from web_clip_helper.cli import app
@@ -19,9 +18,9 @@ runner = CliRunner()
 
 
 def _write_config(path: Path, data: dict) -> None:
-    """Write a YAML config dict to *path*."""
+    """Write a JSON config dict to *path*."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.dump(data, default_flow_style=False), encoding="utf-8")
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _parse_jsonl(output: str) -> list[dict]:
@@ -39,8 +38,8 @@ def _config_args(path: Path | None = None) -> list[str]:
 
 @pytest.fixture()
 def config_file(tmp_path: Path) -> Path:
-    """Return a path to a temporary config.yaml with some data."""
-    p = tmp_path / "config.yaml"
+    """Return a path to a temporary config.json with some data."""
+    p = tmp_path / "config.json"
     _write_config(p, {
         "llm": {"api_key": "sk-test-secret-key-1234", "base_url": "https://api.example.com/v1", "model": "gpt-4"},
         "refresh": {"default_interval_days": 14},
@@ -87,7 +86,7 @@ class TestConfigList:
 
     def test_list_with_defaults(self, tmp_path: Path) -> None:
         """Config list on a fresh (auto-created) config shows defaults."""
-        fresh = tmp_path / "subdir" / "config.yaml"
+        fresh = tmp_path / "subdir" / "config.json"
         result = runner.invoke(app, ["config", "list", "--path", str(fresh)])
         assert result.exit_code == 0, result.output
         lines = _parse_jsonl(result.output)
@@ -167,7 +166,7 @@ class TestConfigSet:
 
         # Verify persisted to file
         with open(config_file, encoding="utf-8") as fh:
-            saved = yaml.safe_load(fh)
+            saved = json.loads(fh.read())
         assert saved["llm"]["model"] == "gpt-4"
 
     def test_set_api_key_shows_raw_confirmation(self, config_file: Path) -> None:
@@ -180,7 +179,7 @@ class TestConfigSet:
 
         # Verify persisted
         with open(config_file, encoding="utf-8") as fh:
-            saved = yaml.safe_load(fh)
+            saved = json.loads(fh.read())
         assert saved["llm"]["api_key"] == "sk-newkey123"
 
     def test_set_int_coercion(self, config_file: Path) -> None:
@@ -211,7 +210,7 @@ class TestConfigSet:
 
     def test_set_path_option(self, tmp_path: Path) -> None:
         """config set --path writes to the specified file."""
-        cfg = tmp_path / "custom.yaml"
+        cfg = tmp_path / "custom.json"
         _write_config(cfg, {"llm": {"model": "gpt-4o-mini"}})
         result = runner.invoke(app, ["config", "set", "llm.model", "gpt-4", "--path", str(cfg)])
         assert result.exit_code == 0
@@ -241,7 +240,7 @@ class TestConfigPromptTest:
 
     def _config_with_prompts(self, tmp_path: Path, api_key: str = "sk-test-key", prompts: dict | None = None) -> Path:
         """Helper: create a config file with custom prompts."""
-        p = tmp_path / "config.yaml"
+        p = tmp_path / "config.json"
         data = {
             "llm": {
                 "api_key": api_key,
