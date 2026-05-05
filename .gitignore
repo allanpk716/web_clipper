@@ -1,6 +1,7 @@
 
 # ── GSD baseline (auto-generated) ──
-.gsd
+.gsd/**
+!.gsd/PREFERENCES.md
 .gsd-id
 .mcp.json
 .bg-shell/
