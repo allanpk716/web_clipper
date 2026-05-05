@@ -40,13 +40,6 @@ def sample_raw() -> RawContent:
     )
 
 
-def _capture_jsonl(capsys):
-    """Parse captured stdout as JSONL lines."""
-    output = capsys.readouterr().out
-    lines = [line for line in output.strip().split("\n") if line.strip()]
-    return [json.loads(line) for line in lines]
-
-
 class TestNoImagesFlag:
     """Tests for skip_images parameter propagation and behavior."""
 
@@ -110,7 +103,7 @@ class TestNoImagesFlag:
         mock_dl: MagicMock,
         config: Config,
         sample_raw: RawContent,
-        capsys,
+        _capture_jsonl,
     ) -> None:
         """When skip_images=True, image_count in JSONL result is 0."""
         from web_clip_helper.adapters.github import GitHubAdapter
@@ -127,10 +120,10 @@ class TestNoImagesFlag:
         assert result is not None
         assert result.image_count == 0
 
-        lines = _capture_jsonl(capsys)
-        result_lines = [l for l in lines if l.get("type") == "result" and l.get("stage") == "clip"]
+        envelopes = _capture_jsonl()
+        result_lines = [e for e in envelopes if e.get("type") == "result" and e.get("data", {}).get("stage") == "clip"]
         assert len(result_lines) == 1
-        assert result_lines[0]["image_count"] == 0
+        assert result_lines[0]["data"]["image_count"] == 0
 
     @patch("web_clip_helper.services.clip.download_images")
     @patch("web_clip_helper.services.clip.route_url")
@@ -188,26 +181,20 @@ class TestNoImagesFlag:
 class TestTimeoutFlag:
     """Tests for --timeout flag and TIMEOUT_ERROR code."""
 
-    def test_timeout_triggers_timeout_error(self) -> None:
+    def test_timeout_triggers_timeout_error(self, run_sdk_cli) -> None:
         """When pipeline exceeds timeout, a TIMEOUT_ERROR JSONL line is emitted."""
-        from typer.testing import CliRunner
-        from web_clip_helper.cli import app
-
         def _slow_clip(*args, **kwargs):
             time.sleep(5)
             return None
 
-        with patch("web_clip_helper.services.clip.clip_url", side_effect=_slow_clip):
-            runner = CliRunner()
-            result = runner.invoke(app, ["clip", "https://example.com/slow-test-timeout", "--timeout", "1"])
+        with patch("web_clip_helper.pipeline.clip_url", side_effect=_slow_clip):
+            code, envelopes = run_sdk_cli(["clip", "https://example.com/slow-test-timeout", "--timeout", "1"])
 
-        assert result.exit_code == 4  # TIMEOUT_ERROR → semantic exit code 4
-        output = result.output
-        lines = [json.loads(line) for line in output.strip().split("\n") if line.strip()]
-        error_lines = [l for l in lines if l.get("type") == "error"]
+        assert code == 4  # TIMEOUT_ERROR → semantic exit code 4
+        error_lines = [e for e in envelopes if e.get("type") == "error"]
         assert len(error_lines) >= 1
         assert error_lines[0]["error_code"] == "TIMEOUT_ERROR"
-        assert "1s" in error_lines[0]["detail"]
+        assert "1s" in error_lines[0]["message"]
 
     @patch("web_clip_helper.services.clip.download_images")
     @patch("web_clip_helper.services.clip.route_url")
@@ -217,6 +204,7 @@ class TestTimeoutFlag:
         mock_dl: MagicMock,
         config: Config,
         sample_raw: RawContent,
+        run_sdk_cli,
     ) -> None:
         """When pipeline finishes within timeout, no TIMEOUT_ERROR is emitted."""
         from web_clip_helper.adapters.github import GitHubAdapter
@@ -225,16 +213,10 @@ class TestTimeoutFlag:
         mock_dl.return_value = {"https://example.com/logo.png": "images/img_001.jpg"}
 
         with patch.object(GitHubAdapter, "fetch", return_value=sample_raw):
-            from typer.testing import CliRunner
-            from web_clip_helper.cli import app
+            code, envelopes = run_sdk_cli(["clip", "https://github.com/psf/requests", "--timeout", "60"])
 
-            runner = CliRunner()
-            result = runner.invoke(app, ["clip", "https://github.com/psf/requests", "--timeout", "60"])
-
-        assert result.exit_code == 0
-        output = result.output
-        lines = [json.loads(line) for line in output.strip().split("\n") if line.strip()]
-        error_lines = [l for l in lines if l.get("type") == "error" and l.get("error_code") == "TIMEOUT_ERROR"]
+        assert code == 0
+        error_lines = [e for e in envelopes if e.get("type") == "error" and e.get("error_code") == "TIMEOUT_ERROR"]
         assert len(error_lines) == 0
 
     @patch("web_clip_helper.services.clip.download_images")
@@ -245,6 +227,7 @@ class TestTimeoutFlag:
         mock_dl: MagicMock,
         config: Config,
         sample_raw: RawContent,
+        run_sdk_cli,
     ) -> None:
         """Default timeout of 60s allows normal clips to complete."""
         from web_clip_helper.adapters.github import GitHubAdapter
@@ -253,13 +236,9 @@ class TestTimeoutFlag:
         mock_dl.return_value = {"https://example.com/logo.png": "images/img_001.jpg"}
 
         with patch.object(GitHubAdapter, "fetch", return_value=sample_raw):
-            from typer.testing import CliRunner
-            from web_clip_helper.cli import app
+            code, envelopes = run_sdk_cli(["clip", "https://github.com/psf/requests"])
 
-            runner = CliRunner()
-            result = runner.invoke(app, ["clip", "https://github.com/psf/requests"])
-
-        assert result.exit_code == 0
+        assert code == 0
 
     def test_timeout_error_code_in_registry(self) -> None:
         """TIMEOUT_ERROR is registered in ErrorCode with a description."""
@@ -271,21 +250,15 @@ class TestTimeoutFlag:
         desc = ErrorCode.describe("TIMEOUT_ERROR")
         assert "timeout" in desc.lower()
 
-    def test_timeout_error_jsonl_includes_stage(self) -> None:
+    def test_timeout_error_jsonl_includes_stage(self, run_sdk_cli) -> None:
         """TIMEOUT_ERROR JSONL line includes stage='clip'."""
-        from typer.testing import CliRunner
-        from web_clip_helper.cli import app
-
         def _slow_clip(*args, **kwargs):
             time.sleep(5)
             return None
 
-        with patch("web_clip_helper.services.clip.clip_url", side_effect=_slow_clip):
-            runner = CliRunner()
-            result = runner.invoke(app, ["clip", "https://example.com/slow-test-stage", "--timeout", "1"])
+        with patch("web_clip_helper.pipeline.clip_url", side_effect=_slow_clip):
+            code, envelopes = run_sdk_cli(["clip", "https://example.com/slow-test-stage", "--timeout", "1"])
 
-        output = result.output
-        lines = [json.loads(line) for line in output.strip().split("\n") if line.strip()]
-        error_lines = [l for l in lines if l.get("type") == "error" and l.get("error_code") == "TIMEOUT_ERROR"]
+        error_lines = [e for e in envelopes if e.get("type") == "error" and e.get("error_code") == "TIMEOUT_ERROR"]
         assert len(error_lines) >= 1
-        assert error_lines[0]["stage"] == "clip"
+        assert "clip" in error_lines[0]["message"]

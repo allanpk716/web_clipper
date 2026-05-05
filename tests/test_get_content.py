@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
-from typer.testing import CliRunner
 
-from web_clip_helper.cli import app
 from web_clip_helper.index import ClipIndex
-
-runner = CliRunner()
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -47,6 +41,21 @@ def clip_with_markdown(tmp_path: Path) -> tuple[ClipIndex, int, Path]:
     return idx, clip_id, md_path
 
 
+@pytest.fixture()
+def cli_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a temporary config + DB, patch get_config to use it."""
+    import web_clip_helper.config as cfg_mod
+
+    config_dir = tmp_path / "cfg"
+    config_dir.mkdir()
+    db_path = str(tmp_path / "clips.db")
+    config = cfg_mod.Config(db_path=db_path, storage_path=str(tmp_path / "clips"))
+    config.save(config_dir / "config.json")
+
+    monkeypatch.setattr(cfg_mod, "_cached_config", config)
+    return tmp_path / "clips.db"
+
+
 # ── Test: --content returns markdown body ─────────────────────────────
 
 
@@ -54,21 +63,19 @@ def test_content_flag_returns_markdown_body(
     tmp_path: Path,
     clip_with_markdown: tuple[ClipIndex, int, Path],
     monkeypatch: pytest.MonkeyPatch,
+    run_sdk_cli,
 ) -> None:
     """When --content is set, the result includes a 'content' field with the markdown text."""
     idx, clip_id, md_path = clip_with_markdown
 
     monkeypatch.setattr("web_clip_helper.cli._get_index", lambda: idx)
-    result = runner.invoke(app, ["get", str(clip_id), "--content"])
+    code, envelopes = run_sdk_cli(["get", str(clip_id), "--content"])
 
-    assert result.exit_code == 0, result.output
+    assert code == 0
+    result_obj = next(e for e in envelopes if e.get("type") == "result")
 
-    # Find the result line
-    result_lines = [json.loads(l) for l in result.output.strip().splitlines() if l.strip()]
-    result_obj = next(l for l in result_lines if l.get("type") == "result")
-
-    assert "content" in result_obj
-    assert "Some markdown content here." in result_obj["content"]
+    assert "content" in result_obj["data"]
+    assert "Some markdown content here." in result_obj["data"]["content"]
 
 
 # ── Test: no --content flag omits content field ───────────────────────
@@ -78,19 +85,18 @@ def test_no_content_flag_omits_body(
     tmp_path: Path,
     clip_with_markdown: tuple[ClipIndex, int, Path],
     monkeypatch: pytest.MonkeyPatch,
+    run_sdk_cli,
 ) -> None:
     """Without --content, no 'content' field should be present."""
     idx, clip_id, md_path = clip_with_markdown
 
     monkeypatch.setattr("web_clip_helper.cli._get_index", lambda: idx)
-    result = runner.invoke(app, ["get", str(clip_id)])
+    code, envelopes = run_sdk_cli(["get", str(clip_id)])
 
-    assert result.exit_code == 0, result.output
+    assert code == 0
+    result_obj = next(e for e in envelopes if e.get("type") == "result")
 
-    result_lines = [json.loads(l) for l in result.output.strip().splitlines() if l.strip()]
-    result_obj = next(l for l in result_lines if l.get("type") == "result")
-
-    assert "content" not in result_obj
+    assert "content" not in result_obj["data"]
 
 
 # ── Test: file-missing warning ────────────────────────────────────────
@@ -99,6 +105,7 @@ def test_no_content_flag_omits_body(
 def test_content_flag_warns_on_missing_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    run_sdk_cli,
 ) -> None:
     """When markdown file is missing, emit a warning and omit content field."""
     idx = ClipIndex(tmp_path / "clips.db")
@@ -118,19 +125,17 @@ def test_content_flag_warns_on_missing_file(
     })
 
     monkeypatch.setattr("web_clip_helper.cli._get_index", lambda: idx)
-    result = runner.invoke(app, ["get", str(clip_id), "--content"])
+    code, envelopes = run_sdk_cli(["get", str(clip_id), "--content"])
 
-    assert result.exit_code == 0, result.output
-
-    lines = [json.loads(l) for l in result.output.strip().splitlines() if l.strip()]
+    assert code == 0
     # Should have a warning about missing file
-    warnings = [l for l in lines if l.get("type") == "warning"]
+    warnings = [e for e in envelopes if e.get("type") == "warning"]
     assert len(warnings) >= 1
     assert "not found" in warnings[0]["message"].lower() or "Markdown" in warnings[0]["message"]
 
     # Result should NOT include content
-    result_obj = next(l for l in lines if l.get("type") == "result")
-    assert "content" not in result_obj
+    result_obj = next(e for e in envelopes if e.get("type") == "result")
+    assert "content" not in result_obj["data"]
 
 
 # ── Test: empty markdown file returns empty string ────────────────────
@@ -139,6 +144,7 @@ def test_content_flag_warns_on_missing_file(
 def test_content_flag_empty_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    run_sdk_cli,
 ) -> None:
     """An empty markdown file returns content as empty string."""
     idx = ClipIndex(tmp_path / "clips.db")
@@ -159,15 +165,13 @@ def test_content_flag_empty_file(
     })
 
     monkeypatch.setattr("web_clip_helper.cli._get_index", lambda: idx)
-    result = runner.invoke(app, ["get", str(clip_id), "--content"])
+    code, envelopes = run_sdk_cli(["get", str(clip_id), "--content"])
 
-    assert result.exit_code == 0, result.output
+    assert code == 0
+    result_obj = next(e for e in envelopes if e.get("type") == "result")
 
-    lines = [json.loads(l) for l in result.output.strip().splitlines() if l.strip()]
-    result_obj = next(l for l in lines if l.get("type") == "result")
-
-    assert "content" in result_obj
-    assert result_obj["content"] == ""
+    assert "content" in result_obj["data"]
+    assert result_obj["data"]["content"] == ""
 
 
 # ── Test: non-UTF8 file emits warning and omits content ───────────────
@@ -176,6 +180,7 @@ def test_content_flag_empty_file(
 def test_content_flag_non_utf8_warns(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    run_sdk_cli,
 ) -> None:
     """A non-UTF8 markdown file triggers a UnicodeDecodeError warning and omits content."""
     idx = ClipIndex(tmp_path / "clips.db")
@@ -196,16 +201,14 @@ def test_content_flag_non_utf8_warns(
     })
 
     monkeypatch.setattr("web_clip_helper.cli._get_index", lambda: idx)
-    result = runner.invoke(app, ["get", str(clip_id), "--content"])
+    code, envelopes = run_sdk_cli(["get", str(clip_id), "--content"])
 
-    assert result.exit_code == 0, result.output
-
-    lines = [json.loads(l) for l in result.output.strip().splitlines() if l.strip()]
+    assert code == 0
     # Should have a warning about encoding
-    warnings = [l for l in lines if l.get("type") == "warning"]
+    warnings = [e for e in envelopes if e.get("type") == "warning"]
     assert len(warnings) >= 1
     assert "encoding" in warnings[0]["message"].lower() or "UnicodeDecodeError" in str(warnings[0])
 
     # Result should NOT include content
-    result_obj = next(l for l in lines if l.get("type") == "result")
-    assert "content" not in result_obj
+    result_obj = next(e for e in envelopes if e.get("type") == "result")
+    assert "content" not in result_obj["data"]

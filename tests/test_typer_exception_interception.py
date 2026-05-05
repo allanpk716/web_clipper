@@ -1,32 +1,21 @@
-"""Tests for _JSONLGroup Typer exception interception.
+"""Tests for _SDKGroup Typer exception interception.
 
 Verifies that all Click/Typer exceptions (missing arguments, invalid options,
-missing subcommands) are intercepted by _JSONLGroup and emitted as JSONL
-error lines with error_code=INPUT_INVALID instead of Typer's native Rich text.
+missing subcommands) are intercepted by _SDKGroup and emitted as SDK Envelope
+JSONL error lines with error_code=INPUT_INVALID.
 
 Every test:
-  1. Invokes the CLI via subprocess so _JSONLGroup.main() runs in standalone mode.
-  2. Asserts each stdout line is valid JSON (json.loads does not raise).
+  1. Invokes the CLI via subprocess so App.run() runs in standalone mode.
+  2. Asserts each stdout line is valid SDK Envelope JSON.
   3. Asserts type=error and error_code=INPUT_INVALID.
-  4. Asserts exit code is 2 (semantic INPUT_INVALID exit code).
+  4. Asserts exit code matches the expected semantic code.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
-
-# Ensure subprocess invocations use the worktree source, not the main repo
-# (the editable install .pth points to the main repo).
-_WORKTREE_SRC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "src")
-_SUBPROCESS_ENV = os.environ.copy()
-# Prepend worktree src to PYTHONPATH so it takes priority over .pth
-_existing_pp = _SUBPROCESS_ENV.get("PYTHONPATH", "")
-_SUBPROCESS_ENV["PYTHONPATH"] = (
-    _WORKTREE_SRC + os.pathsep + _existing_pp if _existing_pp else _WORKTREE_SRC
-)
 
 
 def _run(*args: str) -> subprocess.CompletedProcess:
@@ -36,18 +25,23 @@ def _run(*args: str) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         timeout=30,
-        env=_SUBPROCESS_ENV,
     )
 
 
-def _parse_jsonl(stdout: str) -> list[dict]:
-    """Parse stdout into a list of JSON objects, one per line."""
+def _parse_envelopes(stdout: str) -> list[dict]:
+    """Parse stdout into a list of SDK Envelope JSON objects."""
     lines = [line for line in stdout.strip().splitlines() if line.strip()]
-    return [json.loads(line) for line in lines]
+    envelopes = []
+    for line in lines:
+        obj = json.loads(line)
+        for field in ("version", "tool", "type", "timestamp"):
+            assert field in obj, f"Envelope missing required field {field!r}: {line}"
+        envelopes.append(obj)
+    return envelopes
 
 
-def _assert_jsonl_error(process: subprocess.CompletedProcess) -> dict:
-    """Assert stdout contains at least one JSONL error with INPUT_INVALID.
+def _assert_envelope_error(process: subprocess.CompletedProcess) -> dict:
+    """Assert stdout contains at least one SDK Envelope error with INPUT_INVALID.
 
     Returns the first matching error dict for further assertions.
     """
@@ -55,10 +49,10 @@ def _assert_jsonl_error(process: subprocess.CompletedProcess) -> dict:
         f"Expected JSONL on stdout but got empty output.\n"
         f"stderr: {process.stderr}"
     )
-    objs = _parse_jsonl(process.stdout)
-    error_lines = [o for o in objs if o.get("type") == "error"]
+    envelopes = _parse_envelopes(process.stdout)
+    error_lines = [o for o in envelopes if o.get("type") == "error"]
     assert len(error_lines) >= 1, (
-        f"Expected at least one JSONL error line, got: {objs}"
+        f"Expected at least one error envelope, got: {envelopes}"
     )
     err = error_lines[0]
     assert err["type"] == "error", f"Expected type=error, got: {err}"
@@ -72,51 +66,54 @@ def _assert_jsonl_error(process: subprocess.CompletedProcess) -> dict:
 
 
 class TestMissingArguments:
-    """Commands that require arguments should emit JSONL error when args are missing."""
+    """Commands that require arguments should emit envelope error when args are missing."""
 
     def test_search_missing_keyword(self) -> None:
-        """search without KEYWORD → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """search without KEYWORD → envelope error INPUT_INVALID, exit 2."""
         r = _run("search")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
-        assert "KEYWORD" in err["detail"]
+        msg = err.get("message", "")
+        assert "KEYWORD" in msg
 
     def test_get_missing_id(self) -> None:
-        """get without CLIP_ID → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """get without CLIP_ID → envelope error INPUT_INVALID, exit 2."""
         r = _run("get")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
-        assert "CLIP_ID" in err["detail"] or "ID" in err["detail"]
+        msg = err.get("message", "")
+        assert "CLIP_ID" in msg or "ID" in msg
 
     def test_delete_missing_id(self) -> None:
-        """delete without CLIP_ID → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """delete without CLIP_ID → envelope error INPUT_INVALID, exit 2."""
         r = _run("delete")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
-        assert "CLIP_ID" in err["detail"] or "ID" in err["detail"]
+        msg = err.get("message", "")
+        assert "CLIP_ID" in msg or "ID" in msg
 
     def test_config_get_missing_key(self) -> None:
-        """config get without KEY → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """config get without KEY → envelope error INPUT_INVALID, exit 2."""
         r = _run("config", "get")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
 
     def test_config_set_missing_key(self) -> None:
-        """config set without KEY → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """config set without KEY → envelope error INPUT_INVALID, exit 2."""
         r = _run("config", "set")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
 
     def test_config_set_missing_value(self) -> None:
-        """config set with KEY but no VALUE → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """config set with KEY but no VALUE → envelope error INPUT_INVALID, exit 2."""
         r = _run("config", "set", "some.key")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
 
     def test_feedback_missing_description(self) -> None:
-        """feedback without DESCRIPTION → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """feedback without DESCRIPTION → envelope error INPUT_INVALID, exit 2."""
         r = _run("feedback")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
 
 
@@ -124,31 +121,32 @@ class TestMissingArguments:
 
 
 class TestInvalidOptions:
-    """Unknown options should emit JSONL error, not Typer Rich text."""
+    """Unknown options should emit envelope error, not Typer Rich text."""
 
     def test_clip_unknown_option(self) -> None:
-        """clip --nonexistent-option → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """clip --nonexistent-option → envelope error INPUT_INVALID, exit 2."""
         r = _run("clip", "--nonexistent-option")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
-        assert "nonexistent" in err["detail"].lower() or "no such option" in err["detail"].lower()
+        msg = err.get("message", "").lower()
+        assert "nonexistent" in msg or "no such option" in msg
 
     def test_search_unknown_option(self) -> None:
-        """search --bogus keyword → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """search --bogus keyword → envelope error INPUT_INVALID, exit 2."""
         r = _run("search", "--bogus", "test")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
 
     def test_list_unknown_option(self) -> None:
-        """list --invalid-flag → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """list --invalid-flag → envelope error INPUT_INVALID, exit 2."""
         r = _run("list", "--invalid-flag")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
 
     def test_global_unknown_option(self) -> None:
-        """Global unknown option → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """Global unknown option → envelope error INPUT_INVALID, exit 2."""
         r = _run("--nonexistent-global-flag")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
 
 
@@ -156,18 +154,18 @@ class TestInvalidOptions:
 
 
 class TestMissingSubcommand:
-    """Groups that require subcommands should emit JSONL error."""
+    """Groups that require subcommands should emit envelope error."""
 
     def test_config_no_subcommand(self) -> None:
-        """config (no subcommand) → JSONL error INPUT_INVALID (NoArgsIsHelpError)."""
+        """config (no subcommand) → envelope error INPUT_INVALID."""
         r = _run("config")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
 
     def test_config_prompt_no_subcommand(self) -> None:
-        """config prompt (no subcommand) → JSONL error INPUT_INVALID."""
+        """config prompt (no subcommand) → envelope error INPUT_INVALID."""
         r = _run("config", "prompt")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
 
 
@@ -175,37 +173,39 @@ class TestMissingSubcommand:
 
 
 class TestNestedSubcommandMissingOptions:
-    """config prompt test requires --type and --url; missing either → JSONL error."""
+    """config prompt test requires --type and --url; missing either → envelope error."""
 
     def test_prompt_test_missing_type(self) -> None:
-        """config prompt test without --type → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """config prompt test without --type → envelope error INPUT_INVALID, exit 2."""
         r = _run("config", "prompt", "test", "--url", "https://example.com")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
-        assert "--type" in err["detail"]
+        msg = err.get("message", "")
+        assert "--type" in msg
 
     def test_prompt_test_missing_url(self) -> None:
-        """config prompt test without --url → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """config prompt test without --url → envelope error INPUT_INVALID, exit 2."""
         r = _run("config", "prompt", "test", "--type", "title")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
-        assert "--url" in err["detail"]
+        msg = err.get("message", "")
+        assert "--url" in msg
 
     def test_prompt_test_missing_both(self) -> None:
-        """config prompt test without --type or --url → JSONL error INPUT_INVALID, exit 2 (INPUT_INVALID)."""
+        """config prompt test without --type or --url → envelope error INPUT_INVALID, exit 2."""
         r = _run("config", "prompt", "test")
-        err = _assert_jsonl_error(r)
+        err = _assert_envelope_error(r)
         assert r.returncode == 2
 
 
-# ── JSONL purity: every stdout line must be valid JSON ────────────
+# ── JSONL purity: every stdout line must be valid SDK Envelope ────
 
 
 class TestJSONLPurity:
-    """Verify stdout contains only valid JSON lines — no Rich text, no ANSI noise."""
+    """Verify stdout contains only valid SDK Envelope lines — no Rich text, no ANSI noise."""
 
     def test_search_missing_args_pure_jsonl(self) -> None:
-        """Every line of stdout from a failing search must be valid JSON."""
+        """Every line of stdout from a failing search must be valid SDK Envelope."""
         r = _run("search")
         assert r.returncode != 0
         lines = [l for l in r.stdout.strip().splitlines() if l.strip()]
@@ -216,7 +216,7 @@ class TestJSONLPurity:
         assert any(o.get("type") == "error" for o in parsed)
 
     def test_get_missing_args_pure_jsonl(self) -> None:
-        """Every line of stdout from a failing get must be valid JSON."""
+        """Every line of stdout from a failing get must be valid SDK Envelope."""
         r = _run("get")
         assert r.returncode != 0
         lines = [l for l in r.stdout.strip().splitlines() if l.strip()]
@@ -224,7 +224,7 @@ class TestJSONLPurity:
         assert any(o.get("type") == "error" for o in parsed)
 
     def test_clip_bad_option_pure_jsonl(self) -> None:
-        """Every line of stdout from clip with bad option must be valid JSON."""
+        """Every line of stdout from clip with bad option must be valid SDK Envelope."""
         r = _run("clip", "--bad-opt")
         assert r.returncode != 0
         lines = [l for l in r.stdout.strip().splitlines() if l.strip()]
@@ -242,7 +242,7 @@ class TestJSONLPurity:
         assert "usage:" not in stdout
 
     def test_config_no_subcommand_pure_jsonl(self) -> None:
-        """config without subcommand: stdout is pure JSONL (no Rich table)."""
+        """config without subcommand: stdout is pure SDK Envelope JSONL."""
         r = _run("config")
         assert r.returncode != 0
         lines = [l for l in r.stdout.strip().splitlines() if l.strip()]
@@ -250,7 +250,7 @@ class TestJSONLPurity:
         assert any(o.get("type") == "error" for o in parsed)
 
     def test_config_prompt_test_missing_opts_pure_jsonl(self) -> None:
-        """config prompt test without required opts: stdout is pure JSONL."""
+        """config prompt test without required opts: stdout is pure SDK Envelope."""
         r = _run("config", "prompt", "test")
         assert r.returncode != 0
         lines = [l for l in r.stdout.strip().splitlines() if l.strip()]

@@ -36,45 +36,36 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def _reset_trace_id():
-    """Override conftest's autouse to NOT reset the App singleton.
-
-    The SDK agent commands in cli.py capture the App instance at import
-    time via closures (create_agent_app(app)). If we reset the singleton,
-    new get_app() calls return a different App whose Writer buffer is
-    never written to by the closure-captured SDK commands.  Instead, we
-    keep the same App instance and just reset quiet mode between tests.
-    """
+    """Reset quiet mode between tests. Conftest handles Writer buffer cleanup."""
+    from web_clip_helper.output import set_quiet
     set_quiet(False)
     yield
     set_quiet(False)
 
 
-# ── Helpers: CliRunner + drain SDK Writer buffer ─────────────────
+# ── Helpers ─────────────────────────────────────────────────────
 
 
-def _get_writer_buffer():
-    """Return the SDK Writer's internal StringIO buffer."""
+def _run_and_capture(args: list[str], run_sdk_cli=None) -> tuple[int, list[dict]]:
+    """Invoke CLI and capture SDK Writer JSONL output.
+    
+    If run_sdk_cli fixture is available, uses it for proper SDK output capture.
+    Otherwise falls back to CliRunner + Writer buffer drain.
+    """
+    set_quiet(False)
+    if run_sdk_cli is not None:
+        return run_sdk_cli(args)
+    # Fallback: drain writer buffer
     from web_clip_helper.app import get_app
-    return get_app().writer._output
-
-
-def _drain_buffer(buf) -> list[dict]:
-    """Read all JSONL lines from the writer's buffer, clear it, return parsed."""
+    buf = get_app().writer._output
+    buf.truncate(0)
+    buf.seek(0)
+    result = runner.invoke(app, args)
     content = buf.getvalue()
     buf.truncate(0)
     buf.seek(0)
     lines = [l for l in content.strip().splitlines() if l.strip()]
-    return [json.loads(l) for l in lines]
-
-
-def _run_and_capture(args: list[str]) -> tuple[int, list[dict]]:
-    """Invoke CLI via CliRunner and capture JSONL from SDK Writer's buffer."""
-    set_quiet(False)
-    buf = _get_writer_buffer()
-    buf.truncate(0)
-    buf.seek(0)
-    result = runner.invoke(app, args)
-    msgs = _drain_buffer(buf)
+    msgs = [json.loads(l) for l in lines]
     return result.exit_code, msgs
 
 

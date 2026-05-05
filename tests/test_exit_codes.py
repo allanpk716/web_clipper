@@ -1,13 +1,12 @@
 """Tests verifying exit code conventions: 0 for success, non-zero for failure.
 
-Covers three core scenarios from the Typer callback refactor:
-  1. No subcommand → JSONL help output + exit 0
-  2. clip without args → error JSONL + exit 2 (INPUT_INVALID)
-  3. get nonexistent ID → error JSONL + exit 3 (NOT_FOUND)
+Covers three core scenarios:
+  1. No subcommand → SDK Envelope result output + exit 0
+  2. clip without args → error envelope + exit 2 (INPUT_INVALID)
+  3. get nonexistent ID → error envelope + exit 3 (NOT_FOUND)
 
-Each scenario is tested via both subprocess (`python -m`) and direct
-`app()` invocation to ensure Exit codes propagate correctly through
-both code paths.
+Each scenario is tested via subprocess (``python -m``) which exercises
+the full SDK App.run() code path including _SDKGroup exception interception.
 """
 
 from __future__ import annotations
@@ -27,113 +26,74 @@ def _run_cli(*args: str) -> subprocess.CompletedProcess:
     )
 
 
-def _run_cli_direct(args: list[str]) -> subprocess.CompletedProcess:
-    """Run CLI via direct app() call and return the CompletedProcess result."""
-    return subprocess.run(
-        [
-            sys.executable, "-c",
-            f"import sys; sys.argv = {['test'] + args}; "
-            "from web_clip_helper.cli import app; app()",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+def _parse_envelopes(stdout: str) -> list[dict]:
+    """Parse stdout into a list of SDK Envelope JSON objects."""
+    lines = [line for line in stdout.strip().splitlines() if line.strip()]
+    return [json.loads(line) for line in lines]
 
 
-# ── Scenario 1: No subcommand → JSONL help + exit 0 ─────────────
+# ── Scenario 1: No subcommand → Envelope result + exit 0 ────────
 
 
 class TestNoSubcommandHelp:
-    """No subcommand should emit JSONL help and exit 0."""
+    """No subcommand should emit SDK Envelope result and exit 0."""
 
     def test_no_subcommand_subprocess_exit_0(self) -> None:
         """python -m web_clip_helper.cli (no args) should exit 0."""
         r = _run_cli()
         assert r.returncode == 0
 
-    def test_no_subcommand_subprocess_jsonl_help(self) -> None:
-        """python -m web_clip_helper.cli should output JSONL with type=help."""
+    def test_no_subcommand_subprocess_envelope_result(self) -> None:
+        """python -m web_clip_helper.cli should output SDK Envelope with type=result."""
         r = _run_cli()
-        data = json.loads(r.stdout.strip())
-        assert data["type"] == "help"
-        assert "commands" in data
-
-    def test_no_subcommand_direct_exit_0(self) -> None:
-        """Direct app() with no args should exit 0."""
-        r = _run_cli_direct([])
-        assert r.returncode == 0
-
-    def test_no_subcommand_direct_jsonl_help(self) -> None:
-        """Direct app() with no args should output JSONL with type=help."""
-        r = _run_cli_direct([])
-        data = json.loads(r.stdout.strip())
-        assert data["type"] == "help"
-        assert "commands" in data
+        envelopes = _parse_envelopes(r.stdout)
+        results = [e for e in envelopes if e["type"] == "result"]
+        assert len(results) >= 1
+        assert "commands" in results[0]["data"]
 
 
-# ── Scenario 2: clip without args → error + exit 1 ──────────────
+# ── Scenario 2: clip without args → error + exit 2 ──────────────
 
 
 class TestClipNoArgs:
     """clip command without URL or text should exit 2 (INPUT_INVALID)."""
 
     def test_clip_no_args_subprocess_exit_2(self) -> None:
-        """python -m web_clip_helper.cli clip (no args) should exit 2 (INPUT_INVALID)."""
+        """python -m web_clip_helper.cli clip (no args) should exit 2."""
         r = _run_cli("clip")
         assert r.returncode == 2
 
-    def test_clip_no_args_subprocess_error_jsonl(self) -> None:
-        """clip without args should output JSONL with type=error."""
+    def test_clip_no_args_subprocess_error_envelope(self) -> None:
+        """clip without args should output SDK Envelope with type=error."""
         r = _run_cli("clip")
-        data = json.loads(r.stdout.strip())
-        assert data["type"] == "error"
-        assert data["stage"] == "clip"
-
-    def test_clip_no_args_direct_exit_2(self) -> None:
-        """Direct app() clip (no args) should exit 2 (INPUT_INVALID)."""
-        r = _run_cli_direct(["clip"])
-        assert r.returncode == 2
-
-    def test_clip_no_args_direct_error_jsonl(self) -> None:
-        """Direct app() clip (no args) should output JSONL with type=error."""
-        r = _run_cli_direct(["clip"])
-        data = json.loads(r.stdout.strip())
-        assert data["type"] == "error"
-        assert data["stage"] == "clip"
+        envelopes = _parse_envelopes(r.stdout)
+        errors = [e for e in envelopes if e["type"] == "error"]
+        assert len(errors) >= 1
+        assert errors[0]["error_code"] == "INPUT_INVALID"
+        msg = errors[0].get("message", "")
+        assert "[clip]" in msg
 
 
-# ── Scenario 3: get nonexistent ID → error + exit 1 ─────────────
+# ── Scenario 3: get nonexistent ID → error + exit 3 ─────────────
 
 
 class TestGetNonexistent:
     """get command with nonexistent ID should exit 3 (NOT_FOUND)."""
 
     def test_get_nonexistent_subprocess_exit_3(self) -> None:
-        """python -m web_clip_helper.cli get 999999 should exit 3 (NOT_FOUND)."""
+        """python -m web_clip_helper.cli get 999999 should exit 3."""
         r = _run_cli("get", "999999")
         assert r.returncode == 3
 
-    def test_get_nonexistent_subprocess_error_jsonl(self) -> None:
-        """get nonexistent ID should output JSONL with type=error."""
+    def test_get_nonexistent_subprocess_error_envelope(self) -> None:
+        """get nonexistent ID should output SDK Envelope with type=error."""
         r = _run_cli("get", "999999")
-        data = json.loads(r.stdout.strip())
-        assert data["type"] == "error"
-        assert data["stage"] == "get"
-        assert data["error_code"] == "NOT_FOUND"
-
-    def test_get_nonexistent_direct_exit_3(self) -> None:
-        """Direct app() get nonexistent ID should exit 3 (NOT_FOUND)."""
-        r = _run_cli_direct(["get", "999999"])
-        assert r.returncode == 3
-
-    def test_get_nonexistent_direct_error_jsonl(self) -> None:
-        """Direct app() get nonexistent ID should output JSONL with type=error."""
-        r = _run_cli_direct(["get", "999999"])
-        data = json.loads(r.stdout.strip())
-        assert data["type"] == "error"
-        assert data["stage"] == "get"
-        assert data["error_code"] == "NOT_FOUND"
+        envelopes = _parse_envelopes(r.stdout)
+        errors = [e for e in envelopes if e["type"] == "error"]
+        assert len(errors) >= 1
+        assert errors[0]["error_code"] == "NOT_FOUND"
+        msg = errors[0].get("message", "")
+        assert "[get]" in msg
 
 
 # ── Additional success-path exit code tests ──────────────────────
@@ -164,9 +124,9 @@ class TestExitCodesSuccess:
 
 
 class TestExitCodesFailure:
-    """Commands should exit non-zero on failure (via direct invocation)."""
+    """Commands should exit non-zero on failure."""
 
     def test_config_get_invalid_key_exit_2(self) -> None:
         """config get with invalid key should exit 2 (CONFIG_ERROR)."""
-        exit_code = _run_cli_direct(["config", "get", "nonexistent.key"]).returncode
-        assert exit_code == 2
+        r = _run_cli("config", "get", "nonexistent.key")
+        assert r.returncode == 2

@@ -8,13 +8,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from typer.testing import CliRunner
 
-from web_clip_helper.cli import app
 from web_clip_helper.config import Config
 from web_clip_helper.index import ClipIndex
-
-runner = CliRunner()
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -73,7 +69,7 @@ def cli_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     config_dir.mkdir()
     db_path = str(tmp_path / "clips.db")
     config = Config(db_path=db_path, storage_path=str(tmp_path / "clips"))
-    config.save(config_dir / "config.yaml")
+    config.save(config_dir / "config.json")
 
     # Patch the module-level singleton
     monkeypatch.setattr(cfg_mod, "_cached_config", config)
@@ -217,19 +213,8 @@ class TestDeleteClip:
 # ── CLI integration tests ────────────────────────────────────────────
 
 
-def _run_cli(*args: str) -> str:
-    """Run the CLI and return stdout."""
-    result = runner.invoke(app, args)
-    return result.output
-
-
-def _parse_jsonl(output: str) -> list[dict]:
-    """Parse JSONL output into a list of dicts."""
-    return [json.loads(line) for line in output.strip().splitlines() if line.strip()]
-
-
 class TestCLIList:
-    def test_list_all(self, cli_config: Path) -> None:
+    def test_list_all(self, cli_config: Path, run_sdk_cli) -> None:
         # Populate the DB
         idx = ClipIndex(cli_config)
         idx.save_clip({
@@ -242,16 +227,11 @@ class TestCLIList:
         })
         idx.close()
 
-        output = _run_cli("list")
-        messages = _parse_jsonl(output)
-        progress = [m for m in messages if m["type"] == "progress"]
-        results = [m for m in messages if m["type"] == "result"]
-        assert len(progress) == 1
-        assert progress[0]["total_count"] == 2
-        assert progress[0]["returned_count"] == 2
+        code, envelopes = run_sdk_cli(["list"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 2
 
-    def test_list_by_tag(self, cli_config: Path) -> None:
+    def test_list_by_tag(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         idx.save_clip({
             "url": "https://a.com", "title": "A",
@@ -265,19 +245,17 @@ class TestCLIList:
         })
         idx.close()
 
-        output = _run_cli("list", "--tag", "python")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["list", "--tag", "python"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
-        assert results[0]["title"] == "A"
+        assert results[0]["data"]["title"] == "A"
 
-    def test_list_empty_db(self, cli_config: Path) -> None:
-        output = _run_cli("list")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+    def test_list_empty_db(self, cli_config: Path, run_sdk_cli) -> None:
+        code, envelopes = run_sdk_cli(["list"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert results == []
 
-    def test_list_combined_filters(self, cli_config: Path) -> None:
+    def test_list_combined_filters(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         idx.save_clip({
             "url": "https://a.com", "title": "A",
@@ -291,13 +269,12 @@ class TestCLIList:
         })
         idx.close()
 
-        output = _run_cli("list", "--source-type", "web", "--category", "tech")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["list", "--source-type", "web", "--category", "tech"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
-        assert results[0]["title"] == "A"
+        assert results[0]["data"]["title"] == "A"
 
-    def test_list_with_limit(self, cli_config: Path) -> None:
+    def test_list_with_limit(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         for i in range(5):
             idx.save_clip({
@@ -306,15 +283,11 @@ class TestCLIList:
             })
         idx.close()
 
-        output = _run_cli("list", "--limit", "2")
-        messages = _parse_jsonl(output)
-        progress = [m for m in messages if m["type"] == "progress"]
-        results = [m for m in messages if m["type"] == "result"]
-        assert progress[0]["total_count"] == 5
-        assert progress[0]["returned_count"] == 2
+        code, envelopes = run_sdk_cli(["list", "--limit", "2"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 2
 
-    def test_list_with_offset(self, cli_config: Path) -> None:
+    def test_list_with_offset(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         for i in range(5):
             idx.save_clip({
@@ -323,15 +296,11 @@ class TestCLIList:
             })
         idx.close()
 
-        output = _run_cli("list", "--offset", "3")
-        messages = _parse_jsonl(output)
-        progress = [m for m in messages if m["type"] == "progress"]
-        results = [m for m in messages if m["type"] == "result"]
-        assert progress[0]["total_count"] == 5
-        assert progress[0]["returned_count"] == 2
+        code, envelopes = run_sdk_cli(["list", "--offset", "3"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 2
 
-    def test_list_with_limit_and_offset(self, cli_config: Path) -> None:
+    def test_list_with_limit_and_offset(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         for i in range(5):
             idx.save_clip({
@@ -340,15 +309,11 @@ class TestCLIList:
             })
         idx.close()
 
-        output = _run_cli("list", "--limit", "2", "--offset", "1")
-        messages = _parse_jsonl(output)
-        progress = [m for m in messages if m["type"] == "progress"]
-        results = [m for m in messages if m["type"] == "result"]
-        assert progress[0]["total_count"] == 5
-        assert progress[0]["returned_count"] == 2
+        code, envelopes = run_sdk_cli(["list", "--limit", "2", "--offset", "1"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 2
 
-    def test_list_offset_beyond_results(self, cli_config: Path) -> None:
+    def test_list_offset_beyond_results(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         idx.save_clip({
             "url": "https://a.com", "title": "A",
@@ -356,15 +321,11 @@ class TestCLIList:
         })
         idx.close()
 
-        output = _run_cli("list", "--offset", "100")
-        messages = _parse_jsonl(output)
-        progress = [m for m in messages if m["type"] == "progress"]
-        results = [m for m in messages if m["type"] == "result"]
-        assert progress[0]["total_count"] == 1
-        assert progress[0]["returned_count"] == 0
+        code, envelopes = run_sdk_cli(["list", "--offset", "100"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert results == []
 
-    def test_list_limit_with_tag_filter(self, cli_config: Path) -> None:
+    def test_list_limit_with_tag_filter(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         idx.save_clip({
             "url": "https://a.com", "title": "A",
@@ -383,31 +344,25 @@ class TestCLIList:
         })
         idx.close()
 
-        output = _run_cli("list", "--tag", "python", "--limit", "1")
-        messages = _parse_jsonl(output)
-        progress = [m for m in messages if m["type"] == "progress"]
-        results = [m for m in messages if m["type"] == "result"]
-        assert progress[0]["total_count"] == 2
-        assert progress[0]["returned_count"] == 1
+        code, envelopes = run_sdk_cli(["list", "--tag", "python", "--limit", "1"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
 
-    def test_list_invalid_limit(self, cli_config: Path) -> None:
-        output = _run_cli("list", "--limit", "0")
-        messages = _parse_jsonl(output)
-        errors = [m for m in messages if m["type"] == "error"]
+    def test_list_invalid_limit(self, cli_config: Path, run_sdk_cli) -> None:
+        code, envelopes = run_sdk_cli(["list", "--limit", "0"])
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert len(errors) == 1
-        assert "Invalid limit" in errors[0]["detail"]
+        assert "Invalid limit" in errors[0]["message"]
 
-    def test_list_invalid_offset(self, cli_config: Path) -> None:
-        output = _run_cli("list", "--offset", "-1")
-        messages = _parse_jsonl(output)
-        errors = [m for m in messages if m["type"] == "error"]
+    def test_list_invalid_offset(self, cli_config: Path, run_sdk_cli) -> None:
+        code, envelopes = run_sdk_cli(["list", "--offset", "-1"])
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert len(errors) == 1
-        assert "Invalid offset" in errors[0]["detail"]
+        assert "Invalid offset" in errors[0]["message"]
 
 
 class TestCLIGet:
-    def test_get_existing(self, cli_config: Path) -> None:
+    def test_get_existing(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         cid = idx.save_clip({
             "url": "https://example.com", "title": "Test",
@@ -415,23 +370,22 @@ class TestCLIGet:
         })
         idx.close()
 
-        output = _run_cli("get", str(cid))
-        messages = _parse_jsonl(output)
-        assert len(messages) == 1
-        assert messages[0]["type"] == "result"
-        assert messages[0]["id"] == cid
-        assert messages[0]["title"] == "Test"
+        code, envelopes = run_sdk_cli(["get", str(cid)])
+        results = [e for e in envelopes if e["type"] == "result"]
+        assert len(results) == 1
+        data = results[0]["data"]
+        assert data["id"] == cid
+        assert data["title"] == "Test"
 
-    def test_get_nonexistent(self, cli_config: Path) -> None:
-        output = _run_cli("get", "99999")
-        messages = _parse_jsonl(output)
-        errors = [m for m in messages if m["type"] == "error"]
+    def test_get_nonexistent(self, cli_config: Path, run_sdk_cli) -> None:
+        code, envelopes = run_sdk_cli(["get", "99999"])
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert len(errors) == 1
-        assert "not found" in errors[0]["detail"]
+        assert "not found" in errors[0]["message"]
 
 
 class TestCLISearch:
-    def test_search_with_results(self, cli_config: Path) -> None:
+    def test_search_with_results(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         idx.save_clip({
             "url": "https://example.com/python", "title": "Python Intro",
@@ -439,13 +393,12 @@ class TestCLISearch:
         })
         idx.close()
 
-        output = _run_cli("search", "python")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["search", "python"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
-        assert results[0]["title"] == "Python Intro"
+        assert results[0]["data"]["title"] == "Python Intro"
 
-    def test_search_no_results(self, cli_config: Path) -> None:
+    def test_search_no_results(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         idx.save_clip({
             "url": "https://example.com", "title": "Test",
@@ -453,14 +406,13 @@ class TestCLISearch:
         })
         idx.close()
 
-        output = _run_cli("search", "nonexistent-keyword")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["search", "nonexistent-keyword"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert results == []
 
 
 class TestCLITags:
-    def test_tags_with_data(self, cli_config: Path) -> None:
+    def test_tags_with_data(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         idx.save_clip({
             "url": "https://a.com", "title": "A",
@@ -474,17 +426,15 @@ class TestCLITags:
         })
         idx.close()
 
-        output = _run_cli("tags")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
-        tag_map = {r["tag"]: r["count"] for r in results}
+        code, envelopes = run_sdk_cli(["tags"])
+        results = [e for e in envelopes if e["type"] == "result"]
+        tag_map = {r["data"]["tag"]: r["data"]["count"] for r in results}
         assert tag_map["python"] == 2
         assert tag_map["web"] == 1
 
-    def test_tags_empty_db(self, cli_config: Path) -> None:
-        output = _run_cli("tags")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+    def test_tags_empty_db(self, cli_config: Path, run_sdk_cli) -> None:
+        code, envelopes = run_sdk_cli(["tags"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert results == []
 
 
@@ -602,7 +552,7 @@ class TestRefreshIndex:
 class TestCLIRefresh:
     """CLI integration tests for the refresh command."""
 
-    def test_refresh_no_dynamic_clips(self, cli_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_refresh_no_dynamic_clips(self, cli_config: Path, monkeypatch: pytest.MonkeyPatch, run_sdk_cli) -> None:
         """No dynamic clips → report nothing to refresh."""
         idx = ClipIndex(cli_config)
         idx.save_clip({
@@ -615,15 +565,14 @@ class TestCLIRefresh:
         })
         idx.close()
 
-        output = _run_cli("refresh")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["refresh"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
-        assert results[0]["refreshed"] == 0
-        assert results[0]["message"] == "No clips due for refresh"
+        assert results[0]["data"]["refreshed"] == 0
+        assert results[0]["data"]["message"] == "No clips due for refresh"
 
     def test_refresh_with_expired_dynamic(
-        self, cli_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, cli_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, run_sdk_cli
     ) -> None:
         """Expired dynamic clip → clip_url is called, record updated."""
         from web_clip_helper.models import ClipResult
@@ -661,21 +610,20 @@ class TestCLIRefresh:
             record_id=cid,
         )
 
-        with patch("web_clip_helper.services.clip.clip_url", return_value=mock_result) as mock_clip:
-            output = _run_cli("refresh")
+        with patch("web_clip_helper.pipeline.clip_url", return_value=mock_result) as mock_clip:
+            code, envelopes = run_sdk_cli(["refresh"])
             mock_clip.assert_called_once()
 
-        messages = _parse_jsonl(output)
-        errors = [m for m in messages if m["type"] == "error"]
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert errors == [], f"Unexpected errors: {errors}"
 
-        results = [m for m in messages if m["type"] == "result" and "refreshed" in m]
+        results = [e for e in envelopes if e["type"] == "result" and "refreshed" in e.get("data", {})]
         assert len(results) == 1
-        assert results[0]["refreshed"] == 1
-        assert results[0]["failed"] == 0
+        assert results[0]["data"]["refreshed"] == 1
+        assert results[0]["data"]["failed"] == 0
 
     def test_refresh_failure_continues(
-        self, cli_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, cli_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, run_sdk_cli
     ) -> None:
         """If clip_url returns None for one clip, continue and report failure."""
         from web_clip_helper.models import ClipResult
@@ -732,16 +680,15 @@ class TestCLIRefresh:
                 return None
             return mock_ok
 
-        with patch("web_clip_helper.services.clip.clip_url", side_effect=side_effect):
-            output = _run_cli("refresh")
+        with patch("web_clip_helper.pipeline.clip_url", side_effect=side_effect):
+            code, envelopes = run_sdk_cli(["refresh"])
 
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result" and "refreshed" in m]
+        results = [e for e in envelopes if e["type"] == "result" and "refreshed" in e.get("data", {})]
         assert len(results) == 1
-        assert results[0]["refreshed"] == 1
-        assert results[0]["failed"] == 1
+        assert results[0]["data"]["refreshed"] == 1
+        assert results[0]["data"]["failed"] == 1
 
-    def test_refresh_non_dynamic_not_selected(self, cli_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_refresh_non_dynamic_not_selected(self, cli_config: Path, monkeypatch: pytest.MonkeyPatch, run_sdk_cli) -> None:
         """Non-dynamic clips should not be selected for refresh."""
 
         idx = ClipIndex(cli_config)
@@ -755,14 +702,13 @@ class TestCLIRefresh:
         })
         idx.close()
 
-        with patch("web_clip_helper.services.clip.clip_url") as mock_clip:
-            output = _run_cli("refresh")
+        with patch("web_clip_helper.pipeline.clip_url") as mock_clip:
+            code, envelopes = run_sdk_cli(["refresh"])
             mock_clip.assert_not_called()
 
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
-        assert results[0]["message"] == "No clips due for refresh"
+        assert results[0]["data"]["message"] == "No clips due for refresh"
 
 
 # ── Feedback tests ──────────────────────────────────────────────────────
@@ -773,40 +719,35 @@ class TestCLIRefresh:
 class TestCLIVersion:
     """CLI integration tests for the version command."""
 
-    def test_version_outputs_valid_jsonl(self) -> None:
+    def test_version_outputs_valid_jsonl(self, run_sdk_cli) -> None:
         """version command output is valid JSONL."""
-        output = _run_cli("version")
-        messages = _parse_jsonl(output)
-        assert len(messages) >= 1
+        code, envelopes = run_sdk_cli(["version"])
+        assert len(envelopes) >= 1
 
-    def test_version_contains_version_field(self) -> None:
+    def test_version_contains_version_field(self, run_sdk_cli) -> None:
         """Result JSONL contains a non-empty version field."""
-        output = _run_cli("version")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["version"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
-        assert "version" in results[0]
-        assert results[0]["version"] != ""
+        assert "version" in results[0]["data"]
+        assert results[0]["data"]["version"] != ""
 
-    def test_version_type_is_result(self) -> None:
+    def test_version_type_is_result(self, run_sdk_cli) -> None:
         """Result message type is 'result'."""
-        output = _run_cli("version")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
+        code, envelopes = run_sdk_cli(["version"])
+        results = [e for e in envelopes if e["type"] == "result"]
         assert len(results) == 1
 
-    def test_version_matches_package_version(self) -> None:
+    def test_version_matches_package_version(self, run_sdk_cli) -> None:
         """Reported version matches web_clip_helper.__version__."""
         from web_clip_helper import __version__
 
-        output = _run_cli("version")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
-        assert results[0]["version"] == __version__
+        code, envelopes = run_sdk_cli(["version"])
+        results = [e for e in envelopes if e["type"] == "result"]
+        assert results[0]["data"]["version"] == __version__
 
-    def test_version_stage_is_version(self) -> None:
+    def test_version_stage_is_version(self, run_sdk_cli) -> None:
         """Result stage is 'version'."""
-        output = _run_cli("version")
-        messages = _parse_jsonl(output)
-        results = [m for m in messages if m["type"] == "result"]
-        assert results[0]["stage"] == "version"
+        code, envelopes = run_sdk_cli(["version"])
+        results = [e for e in envelopes if e["type"] == "result"]
+        assert results[0]["data"]["stage"] == "version"

@@ -252,7 +252,12 @@ def prompt_test(
     import sys as _sys
 
     # Windows GBK encoding fix (MEM043/MEM047)
-    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    # Guard against _FakeStream (SDK App.run() replaces sys.stdout) which
+    # lacks reconfigure.  When running in-process via App.run() the Writer
+    # already targets the real stdout, so reconfigure is unnecessary.
+    _stdout = _sys.stdout
+    if hasattr(_stdout, "reconfigure"):
+        _stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
 
     if type not in ("title", "tags", "classify"):
         jsonl_emit_error(stage="prompt_test", detail=f"Unsupported type: {type}", error_code="INVALID_TYPE")

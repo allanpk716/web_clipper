@@ -27,14 +27,16 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _reset_trace_id():
-    """Reset SDK Writer trace_id and quiet mode between tests to prevent state leakage."""
-    from web_clip_helper.app import get_app, _app as _app_mod
+    """Reset SDK Writer state between tests to prevent leakage.
 
-    # Reset the singleton so each test gets a fresh App/Writer.
+    NEVER null _app. SDK command closures in cli.py capture the App
+    at import time and write to its Writer. If we replace the App,
+    those closures break silently.
+    """
     import web_clip_helper.app as _app_module
-    _app_module._app = None
+    _app_module.get_app().writer.set_quiet(False)
     yield
-    _app_module._app = None
+    _app_module.get_app().writer.set_quiet(False)
 
 
 # ── Temp config fixtures ─────────────────────────────────────────
@@ -75,14 +77,17 @@ def run_sdk_cli(tmp_path: Path):
         import web_clip_helper.app as app_mod
         from web_clip_helper.cli import app as typer_app
 
-        # Capture real stdout — must be set BEFORE App is created,
-        # because App.__init__ saves sys.stdout as self._real_stdout.
-        real_stdout = io.StringIO()
-        saved_stdout = sys.stdout
-        sys.stdout = real_stdout
+        # Capture output by redirecting sys.stdout and the App's _real_stdout.
+        # Do NOT reset _app — SDK command closures capture it at import time.
+        app = app_mod.get_app()
+        app.writer.set_quiet(False)
 
-        # Reset singleton so App picks up our real_stdout
-        app_mod._app = None
+        capture_buf = io.StringIO()
+        saved_stdout = sys.stdout
+        sys.stdout = capture_buf
+        # Patch the App's _real_stdout so SDK Writer writes to our buffer
+        saved_real_stdout = app._real_stdout
+        app._real_stdout = capture_buf
 
         old_exit = sys.exit
         exit_codes: list[int] = []
@@ -94,14 +99,14 @@ def run_sdk_cli(tmp_path: Path):
                 os.environ[k] = v
 
         try:
-            sdk_app = app_mod.get_app()
-            code = sdk_app.run(typer_app, args=args)
+            code = app.run(typer_app, args=args)
             if exit_codes:
                 code = exit_codes[-1]
-            output = real_stdout.getvalue()
-            envelopes = _parse_envelopes(output)
+            output = capture_buf.getvalue()
+            envelopes = _parse_envelopes(output) if output.strip() else []
             return code, envelopes
         finally:
+            app._real_stdout = saved_real_stdout
             sys.stdout = saved_stdout
             sys.exit = old_exit
             for k in list(os.environ.keys()):
@@ -170,7 +175,11 @@ def _capture_jsonl():
     """Fixture for tests that call output functions directly (not via CLI).
 
     Returns a callable that, when invoked, returns the parsed envelopes
-    from the current SDK Writer's internal buffer.
+    from the SDK Writer's internal buffer.
+
+    NOTE: Does NOT reset the App singleton. SDK command closures in cli.py
+    capture the App at import time. We swap the Writer on the existing App
+    instead.
 
     Usage::
 
@@ -181,14 +190,11 @@ def _capture_jsonl():
     """
     from web_clip_helper.app import get_app
 
-    # Ensure a fresh App with a Writer targeting a buffer we own.
-    import web_clip_helper.app as app_mod
-    app_mod._app = None
-
     app = get_app()
     buf = io.StringIO()
     from agentsdk.writer import Writer
     test_writer = Writer(buf, tool_name="web-clip-helper")
+    old_writer = app.writer
     app.set_writer(test_writer)
 
     def _capture() -> list[dict]:
@@ -197,4 +203,7 @@ def _capture_jsonl():
             return []
         return _parse_envelopes(text)
 
-    return _capture
+    yield _capture
+
+    # Restore original writer
+    app.set_writer(old_writer)

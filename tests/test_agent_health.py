@@ -30,14 +30,8 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def _reset_trace_id():
-    """Override conftest's autouse to NOT reset the App singleton.
-
-    The SDK agent commands in cli.py capture the App instance at import
-    time via closures (create_agent_app(app)). If we reset the singleton,
-    new get_app() calls return a different App whose Writer buffer is
-    never written to by the closure-captured SDK commands.  Instead, we
-    keep the same App instance and just reset quiet mode between tests.
-    """
+    """Reset quiet mode between tests. Conftest handles Writer buffer cleanup."""
+    from web_clip_helper.output import set_quiet
     set_quiet(False)
     yield
     set_quiet(False)
