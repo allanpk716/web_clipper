@@ -198,7 +198,7 @@ class TestAgentDoctorStorageDirs:
 
     def test_storage_dirs_fails_on_write_error(self) -> None:
         """When directory is not writable, check should fail."""
-        with patch("web_clip_helper.paths.get_config_dir") as mock_cfg:
+        with patch("web_clip_helper.cli.get_config_dir") as mock_cfg:
             mock_cfg.side_effect = OSError("Permission denied")
 
             from web_clip_helper.cli import _check_storage_dirs

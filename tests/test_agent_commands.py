@@ -606,7 +606,7 @@ class TestAgentDebugLastCrashNoFile:
     """When no crash dump file exists."""
 
     def test_no_crash_exits_zero(self) -> None:
-        with patch("web_clip_helper.paths.get_crash_dump_dir") as mock_dir:
+        with patch("web_clip_helper.app.get_crash_dumps_dir") as mock_dir:
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 mock_dir.return_value = Path(td) / "crash_dumps"
@@ -615,7 +615,7 @@ class TestAgentDebugLastCrashNoFile:
                 assert result.exit_code == 0
 
     def test_no_crash_status(self) -> None:
-        with patch("web_clip_helper.paths.get_crash_dump_dir") as mock_dir:
+        with patch("web_clip_helper.app.get_crash_dumps_dir") as mock_dir:
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 mock_dir.return_value = Path(td) / "crash_dumps"
@@ -627,7 +627,7 @@ class TestAgentDebugLastCrashNoFile:
                 assert lines[0]["status"] == "no_crash"
 
     def test_no_crash_has_detail(self) -> None:
-        with patch("web_clip_helper.paths.get_crash_dump_dir") as mock_dir:
+        with patch("web_clip_helper.app.get_crash_dumps_dir") as mock_dir:
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 mock_dir.return_value = Path(td) / "crash_dumps"
@@ -658,7 +658,7 @@ class TestAgentDebugLastCrashWithFile:
                 "timestamp": "2026-01-01T00:00:00Z",
             }
             crash_dir = self._write_crash_file(td, crash_data)
-            with patch("web_clip_helper.paths.get_crash_dump_dir", return_value=crash_dir):
+            with patch("web_clip_helper.app.get_crash_dumps_dir", return_value=crash_dir):
                 result = runner.invoke(app, ["agent", "debug", "last-crash"])
                 lines = _validate_all_jsonl(result.output)
                 assert len(lines) == 1
@@ -675,7 +675,7 @@ class TestAgentDebugLastCrashWithFile:
                 "trace_id": "abc123",
             }
             crash_dir = self._write_crash_file(td, crash_data)
-            with patch("web_clip_helper.paths.get_crash_dump_dir", return_value=crash_dir):
+            with patch("web_clip_helper.app.get_crash_dumps_dir", return_value=crash_dir):
                 result = runner.invoke(app, ["agent", "debug", "last-crash"])
                 lines = _parse_jsonl(result.output)
                 data = lines[0]["data"]
@@ -688,7 +688,7 @@ class TestAgentDebugLastCrashWithFile:
         with tempfile.TemporaryDirectory() as td:
             crash_data = {"AGENT_ABORTED": True}
             crash_dir = self._write_crash_file(td, crash_data)
-            with patch("web_clip_helper.paths.get_crash_dump_dir", return_value=crash_dir):
+            with patch("web_clip_helper.app.get_crash_dumps_dir", return_value=crash_dir):
                 result = runner.invoke(app, ["agent", "debug", "last-crash"])
                 lines = _parse_jsonl(result.output)
                 assert lines[0]["stage"] == "agent_debug_last_crash"
@@ -703,7 +703,7 @@ class TestAgentDebugLastCrashInvalidJSON:
             crash_dir = Path(td) / "crash_dumps"
             crash_dir.mkdir(parents=True, exist_ok=True)
             (crash_dir / ".last-crash.json").write_text("not valid json {{{", encoding="utf-8")
-            with patch("web_clip_helper.paths.get_crash_dump_dir", return_value=crash_dir):
+            with patch("web_clip_helper.app.get_crash_dumps_dir", return_value=crash_dir):
                 result = runner.invoke(app, ["agent", "debug", "last-crash"])
                 lines = _validate_all_jsonl(result.output)
                 assert lines[0]["type"] == "result"
@@ -811,7 +811,7 @@ class TestAgentCacheCleanMissingDir:
     """When cache directory doesn't exist."""
 
     def test_exits_zero(self) -> None:
-        with patch("web_clip_helper.paths.get_state_dir") as mock_dir:
+        with patch("web_clip_helper.app.get_state_dir") as mock_dir:
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 mock_dir.return_value = Path(td)
@@ -819,7 +819,7 @@ class TestAgentCacheCleanMissingDir:
                 assert result.exit_code == 0
 
     def test_already_clean_status(self) -> None:
-        with patch("web_clip_helper.paths.get_state_dir") as mock_dir:
+        with patch("web_clip_helper.app.get_state_dir") as mock_dir:
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 mock_dir.return_value = Path(td)
@@ -834,7 +834,7 @@ class TestAgentCacheCleanEmptyDir:
     """When cache directory exists but is empty."""
 
     def test_already_clean_when_empty(self) -> None:
-        with patch("web_clip_helper.paths.get_state_dir") as mock_dir:
+        with patch("web_clip_helper.app.get_state_dir") as mock_dir:
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 cache_dir = Path(td) / "cache"
@@ -860,7 +860,7 @@ class TestAgentCacheCleanPopulated:
             sub.mkdir()
             (sub / "nested.txt").write_text("nested content", encoding="utf-8")
 
-            with patch("web_clip_helper.paths.get_state_dir", return_value=Path(td)):
+            with patch("web_clip_helper.app.get_state_dir", return_value=Path(td)):
                 result = runner.invoke(app, ["agent", "cache", "clean"])
                 lines = _validate_all_jsonl(result.output)
                 assert len(lines) == 1
@@ -875,7 +875,7 @@ class TestAgentCacheCleanPopulated:
             cache_dir.mkdir()
             (cache_dir / "file.txt").write_text("x" * 500, encoding="utf-8")
 
-            with patch("web_clip_helper.paths.get_state_dir", return_value=Path(td)):
+            with patch("web_clip_helper.app.get_state_dir", return_value=Path(td)):
                 result = runner.invoke(app, ["agent", "cache", "clean"])
                 lines = _parse_jsonl(result.output)
                 assert "bytes_freed" in lines[0]
@@ -888,7 +888,7 @@ class TestAgentCacheCleanPopulated:
             cache_dir.mkdir()
             (cache_dir / "file.txt").write_text("data", encoding="utf-8")
 
-            with patch("web_clip_helper.paths.get_state_dir", return_value=Path(td)):
+            with patch("web_clip_helper.app.get_state_dir", return_value=Path(td)):
                 result = runner.invoke(app, ["agent", "cache", "clean"])
                 lines = _parse_jsonl(result.output)
                 assert "cache_dir" in lines[0]
@@ -900,7 +900,7 @@ class TestAgentCacheCleanPopulated:
             cache_dir.mkdir()
             (cache_dir / "file.txt").write_text("data", encoding="utf-8")
 
-            with patch("web_clip_helper.paths.get_state_dir", return_value=Path(td)):
+            with patch("web_clip_helper.app.get_state_dir", return_value=Path(td)):
                 result = runner.invoke(app, ["agent", "cache", "clean"])
                 lines = _parse_jsonl(result.output)
                 assert lines[0]["stage"] == "agent_cache_clean"
@@ -968,7 +968,7 @@ class TestAgentFeatureRecord:
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:
-            with patch("web_clip_helper.paths.get_state_dir", return_value=Path(td)):
+            with patch("web_clip_helper.app.get_state_dir", return_value=Path(td)):
                 result = runner.invoke(app, [
                     "agent", "feature", "record",
                     "--name", "batch export",
@@ -1014,7 +1014,7 @@ class TestAgentFeatureRecord:
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:
-            with patch("web_clip_helper.paths.get_state_dir", return_value=Path(td)):
+            with patch("web_clip_helper.app.get_state_dir", return_value=Path(td)):
                 runner.invoke(app, [
                     "agent", "feature", "record",
                     "--name", "first", "--desc", "First feature",
@@ -1054,7 +1054,7 @@ class TestAgentFeatureList:
                 encoding="utf-8",
             )
 
-            with patch("web_clip_helper.paths.get_state_dir", return_value=Path(td)):
+            with patch("web_clip_helper.app.get_state_dir", return_value=Path(td)):
                 result = runner.invoke(app, ["agent", "feature", "list"])
                 lines = _validate_all_jsonl(result.output)
                 # 2 dict lines + 1 result summary
@@ -1071,7 +1071,7 @@ class TestAgentFeatureList:
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:
-            with patch("web_clip_helper.paths.get_state_dir", return_value=Path(td)):
+            with patch("web_clip_helper.app.get_state_dir", return_value=Path(td)):
                 result = runner.invoke(app, ["agent", "feature", "list"])
                 lines = _validate_all_jsonl(result.output)
                 assert len(lines) == 1
@@ -1085,7 +1085,7 @@ class TestAgentFeatureList:
             feature_file = Path(td) / "feature_requests.jsonl"
             feature_file.write_text("", encoding="utf-8")
 
-            with patch("web_clip_helper.paths.get_state_dir", return_value=Path(td)):
+            with patch("web_clip_helper.app.get_state_dir", return_value=Path(td)):
                 result = runner.invoke(app, ["agent", "feature", "list"])
                 lines = _validate_all_jsonl(result.output)
                 assert len(lines) == 1
@@ -1117,7 +1117,7 @@ class TestAgentMetricsTrace:
                 json.dumps(crash_data), encoding="utf-8"
             )
 
-            with patch("web_clip_helper.paths.get_crash_dump_dir", return_value=crash_dir):
+            with patch("web_clip_helper.app.get_crash_dumps_dir", return_value=crash_dir):
                 result = runner.invoke(app, ["agent", "metrics", "trace", "--id", "abc123def456"])
                 lines = _validate_all_jsonl(result.output)
                 dict_lines = [l for l in lines if l["type"] == "dict"]
@@ -1134,7 +1134,7 @@ class TestAgentMetricsTrace:
                 json.dumps({"trace_id": "other_id", "source": "signal"}), encoding="utf-8"
             )
 
-            with patch("web_clip_helper.paths.get_crash_dump_dir", return_value=crash_dir):
+            with patch("web_clip_helper.app.get_crash_dumps_dir", return_value=crash_dir):
                 result = runner.invoke(app, ["agent", "metrics", "trace", "--id", "nonexistent"])
                 lines = _validate_all_jsonl(result.output)
                 assert len(lines) == 1
@@ -1153,7 +1153,7 @@ class TestAgentMetricsTrace:
             crash_dir = Path(td) / "crash_dumps"
             # Don't create crash_dir — simulate missing directory
 
-            with patch("web_clip_helper.paths.get_crash_dump_dir", return_value=crash_dir):
+            with patch("web_clip_helper.app.get_crash_dumps_dir", return_value=crash_dir):
                 result = runner.invoke(app, ["agent", "metrics", "trace", "--id", "any_id"])
                 lines = _validate_all_jsonl(result.output)
                 assert len(lines) == 1
@@ -1176,7 +1176,7 @@ class TestAgentMetricsTrace:
                 json.dumps(extra_data), encoding="utf-8"
             )
 
-            with patch("web_clip_helper.paths.get_crash_dump_dir", return_value=crash_dir):
+            with patch("web_clip_helper.app.get_crash_dumps_dir", return_value=crash_dir):
                 result = runner.invoke(app, ["agent", "metrics", "trace", "--id", "target_001"])
                 lines = _validate_all_jsonl(result.output)
                 dict_lines = [l for l in lines if l["type"] == "dict"]

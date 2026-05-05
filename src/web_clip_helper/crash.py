@@ -23,9 +23,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from web_clip_helper.app import get_crash_dumps_dir
 from web_clip_helper.error_codes import exit_code_for
 from web_clip_helper.io_guard import get_real_stderr, get_real_stdout
-from web_clip_helper.paths import get_crash_dump_dir
 
 __all__ = [
     "FlightContext",
@@ -47,7 +47,7 @@ def _resolve_crash_dump_dir() -> Path:
     global _CRASH_DUMP_DIR
     if _CRASH_DUMP_DIR is not None:
         return _CRASH_DUMP_DIR
-    return get_crash_dump_dir()
+    return get_crash_dumps_dir()
 
 
 def _resolve_crash_dump_file() -> Path:

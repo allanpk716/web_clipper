@@ -16,11 +16,10 @@ import click
 import typer
 from typer.core import TyperGroup
 
-from web_clip_helper.app import get_app
+from web_clip_helper.app import get_app, get_reports_dir, get_crash_dumps_dir, get_state_dir, get_data_dir, get_config_dir
 from web_clip_helper.crash import flight_context
 from web_clip_helper.error_codes import exit_code_for
 from web_clip_helper.output import jsonl_emit, jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning, jsonl_emit_dict, jsonl_emit_schema
-from web_clip_helper.paths import get_reports_dir
 
 # Trigger adapter auto-discovery registration
 import web_clip_helper.adapters._registry  # noqa: F401
@@ -218,9 +217,8 @@ def config_set(
     try:
         config = cfg_mod.Config.load(path)
         cfg_mod.set_by_path(config, key, value)
-        from web_clip_helper.paths import get_config_dir
 
-        save_path = path or str(get_config_dir() / "config.yaml")
+        save_path = path or str(get_config_dir() / "config.json")
         config.save(save_path)
         # Invalidate module-level cache so subsequent commands see the new value
         cfg_mod._cached_config = None
@@ -1019,14 +1017,12 @@ def agent_errors() -> None:
 
 
 def _check_storage_dirs() -> dict[str, Any]:
-    """Verify XDG config/data/state directories are writable.
+    """Verify sandbox data/base directories are writable.
 
     Creates and removes a temp file in each directory.
     """
     import time
     import uuid
-
-    from web_clip_helper.paths import get_config_dir, get_data_dir, get_state_dir
 
     start = time.monotonic()
     try:
@@ -1550,9 +1546,7 @@ def agent_debug_last_crash() -> None:
     contents as ``type=dict`` JSONL (one line) with full crash data.  If the
     file does not exist, outputs ``type=result`` with ``status=no_crash``.
     """
-    from web_clip_helper.paths import get_crash_dump_dir
-
-    crash_file = get_crash_dump_dir() / ".last-crash.json"
+    crash_file = get_crash_dumps_dir() / ".last-crash.json"
 
     if not crash_file.exists():
         jsonl_emit_result(
@@ -1589,7 +1583,6 @@ def agent_debug_env(
 
     from web_clip_helper import __version__
     from web_clip_helper.config import get_config
-    from web_clip_helper.paths import get_config_dir, get_data_dir, get_state_dir
 
     config = get_config()
 
@@ -1696,8 +1689,6 @@ def agent_cache(
     """
     import shutil
 
-    from web_clip_helper.paths import get_state_dir
-
     cache_dir = get_state_dir() / "cache"
 
     if not cache_dir.exists():
@@ -1787,7 +1778,6 @@ def agent_feature_record(
     from datetime import datetime, timezone
 
     from web_clip_helper import __version__
-    from web_clip_helper.paths import get_state_dir
 
     if not name or not name.strip():
         jsonl_emit_error(
@@ -1844,8 +1834,6 @@ def agent_feature_list() -> None:
     If file doesn't exist or is empty, outputs type=result with total=0.
     Entries sorted newest-first.
     """
-    from web_clip_helper.paths import get_state_dir
-
     state_dir = get_state_dir()
     feature_file = state_dir / "feature_requests.jsonl"
 
@@ -1914,8 +1902,6 @@ def agent_metrics_trace(
     JSONL with the crash data.  If no matches found, outputs type=result
     with status=not_found.
     """
-    from web_clip_helper.paths import get_crash_dump_dir
-
     if not id or not id.strip():
         jsonl_emit_error(
             stage="agent_metrics_trace",
@@ -1925,7 +1911,7 @@ def agent_metrics_trace(
         raise typer.Exit(exit_code_for("INPUT_INVALID"))
 
     trace_id = id.strip()
-    crash_dir = get_crash_dump_dir()
+    crash_dir = get_crash_dumps_dir()
     matches: list[dict] = []
 
     # Check .last-crash.json first
