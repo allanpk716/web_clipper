@@ -9,10 +9,11 @@ The singleton is lazily initialized on first access via :func:`get_app`.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from agentsdk import App, Sandbox
 
+from web_clip_helper.config import Config
 from web_clip_helper.error_codes import ErrorCode, EXIT_CODE_MAP
 
 __all__ = ["get_app", "get_sandbox", "get_writer"]
@@ -43,7 +44,262 @@ def _init_app() -> App:
         description = ErrorCode.describe(code)
         app.register_error_code(code, exit_code, description)
 
+    # Register SDK providers: ConfigProvider, HealthChecks, CommandMeta.
+    _register_providers(app)
+
     return app
+
+
+# ── Provider registration ─────────────────────────────────────────
+
+
+def _register_providers(app: App) -> None:
+    """Register all SDK providers on the App singleton.
+
+    - ConfigManager as ConfigProvider (enables SDK agent config list/set)
+    - 4 health check functions (migrated from cli.py)
+    - CommandMeta for all business commands (replaces agent_schema.py)
+    """
+    # (a) ConfigManager as ConfigProvider
+    from agentsdk import ConfigManager
+
+    config_path = str(get_config_dir() / "config.json")
+    cm = ConfigManager(Config, config_path)
+    app.register_config("default", cm)
+
+    # (b) Health checks
+    app.register_health_check("storage_dirs", _check_storage_dirs)
+    app.register_health_check("sqlite", _check_sqlite)
+    app.register_health_check("config", _check_config)
+    app.register_health_check("llm_connectivity", _check_llm_connectivity)
+
+    # (c) CommandMeta for all business commands
+    for cmd_path, meta in _build_command_meta().items():
+        app.register_command_meta(cmd_path, meta)
+
+
+# ── Health check functions (migrated from cli.py) ─────────────────
+
+
+def _check_storage_dirs() -> dict[str, Any]:
+    """Verify sandbox data/base directories are writable."""
+    import time
+    import uuid
+
+    start = time.monotonic()
+    try:
+        dirs = {
+            "config": get_config_dir(),
+            "data": get_data_dir(),
+            "state": get_state_dir(),
+        }
+        for label, d in dirs.items():
+            probe = d / f".doctor_{uuid.uuid4().hex[:8]}"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+        elapsed = (time.monotonic() - start) * 1000
+        return {
+            "check": "storage_dirs",
+            "status": "pass",
+            "detail": f"All {len(dirs)} storage directories writable",
+            "duration_ms": round(elapsed, 2),
+        }
+    except Exception as exc:
+        elapsed = (time.monotonic() - start) * 1000
+        return {
+            "check": "storage_dirs",
+            "status": "fail",
+            "detail": f"Storage directory check failed: {exc}",
+            "duration_ms": round(elapsed, 2),
+        }
+
+
+def _check_sqlite() -> dict[str, Any]:
+    """Verify SQLite database is accessible and schema initialized."""
+    import time
+
+    from web_clip_helper.config import get_config
+    from web_clip_helper.index import ClipIndex
+
+    start = time.monotonic()
+    config = get_config()
+    try:
+        idx = ClipIndex(config.db_path)
+        conn = idx._connect()
+        conn.execute("SELECT 1").fetchone()
+        idx.close()
+        elapsed = (time.monotonic() - start) * 1000
+        return {
+            "check": "sqlite",
+            "status": "pass",
+            "detail": f"SQLite accessible at {config.db_path}",
+            "duration_ms": round(elapsed, 2),
+        }
+    except Exception as exc:
+        elapsed = (time.monotonic() - start) * 1000
+        return {
+            "check": "sqlite",
+            "status": "fail",
+            "detail": f"SQLite check failed: {exc}",
+            "duration_ms": round(elapsed, 2),
+        }
+
+
+def _check_config() -> dict[str, Any]:
+    """Verify config loads and has required llm section."""
+    import time
+
+    from web_clip_helper.config import get_config
+
+    start = time.monotonic()
+    try:
+        config = get_config()
+        if not hasattr(config, "llm"):
+            raise ValueError("Missing 'llm' section in config")
+        if not config.llm.base_url or not config.llm.base_url.strip():
+            raise ValueError("llm.base_url is empty")
+        elapsed = (time.monotonic() - start) * 1000
+        return {
+            "check": "config",
+            "status": "pass",
+            "detail": f"Config valid (model={config.llm.model}, base_url={config.llm.base_url})",
+            "duration_ms": round(elapsed, 2),
+        }
+    except Exception as exc:
+        elapsed = (time.monotonic() - start) * 1000
+        return {
+            "check": "config",
+            "status": "fail",
+            "detail": f"Config check failed: {exc}",
+            "duration_ms": round(elapsed, 2),
+        }
+
+
+def _check_llm_connectivity() -> dict[str, Any]:
+    """Verify LLM API is reachable (skip if no api_key configured)."""
+    import time
+
+    import httpx
+
+    from web_clip_helper.config import get_config
+
+    start = time.monotonic()
+    try:
+        config = get_config()
+        if not config.llm.api_key or not config.llm.api_key.strip():
+            elapsed = (time.monotonic() - start) * 1000
+            return {
+                "check": "llm_connectivity",
+                "status": "skip",
+                "detail": "No api_key configured — LLM connectivity check skipped",
+                "duration_ms": round(elapsed, 2),
+            }
+
+        url = f"{config.llm.base_url.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {config.llm.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": config.llm.model,
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 1,
+        }
+        resp = httpx.post(url, json=payload, headers=headers, timeout=15.0)
+        resp.raise_for_status()
+        elapsed = (time.monotonic() - start) * 1000
+        return {
+            "check": "llm_connectivity",
+            "status": "pass",
+            "detail": f"LLM API reachable at {config.llm.base_url} (HTTP {resp.status_code})",
+            "duration_ms": round(elapsed, 2),
+        }
+    except Exception as exc:
+        elapsed = (time.monotonic() - start) * 1000
+        return {
+            "check": "llm_connectivity",
+            "status": "fail",
+            "detail": f"LLM connectivity check failed: {exc}",
+            "duration_ms": round(elapsed, 2),
+        }
+
+
+# ── Command metadata (replaces agent_schema.py) ───────────────────
+
+
+def _build_command_meta() -> dict[str, dict[str, Any]]:
+    """Return command metadata for all business commands.
+
+    Each key is the CLI command path (e.g. ``"clip"``, ``"config list"``).
+    Each value is a dict with ``description``, ``is_idempotent``, and
+    ``parameters`` — matching the schema previously in agent_schema.py.
+    """
+    return {
+        "clip": {
+            "description": "Clip a URL or raw text into Markdown + storage",
+            "is_idempotent": False,
+        },
+        "list": {
+            "description": "List clipped items with optional filters and pagination",
+            "is_idempotent": True,
+        },
+        "get": {
+            "description": "Get a single clipped item by ID",
+            "is_idempotent": True,
+        },
+        "search": {
+            "description": "Search clipped items by keyword in title and URL",
+            "is_idempotent": True,
+        },
+        "tags": {
+            "description": "List all unique tags with usage counts",
+            "is_idempotent": True,
+        },
+        "delete": {
+            "description": "Delete a clipped item by ID. Removes record from DB and folder from disk",
+            "is_idempotent": True,
+        },
+        "update": {
+            "description": "Update clip fields (title, tags, category, dynamic flag, refresh interval)",
+            "is_idempotent": True,
+        },
+        "refresh": {
+            "description": "Refresh dynamic clipped items that are due for re-clip",
+            "is_idempotent": True,
+        },
+        "version": {
+            "description": "Print the current version",
+            "is_idempotent": True,
+        },
+        "config list": {
+            "description": "List all configuration values (api_key is masked)",
+            "is_idempotent": True,
+        },
+        "config get": {
+            "description": "Get a single configuration value by dot-path key",
+            "is_idempotent": True,
+        },
+        "config set": {
+            "description": "Set a configuration value by dot-path key and save to file",
+            "is_idempotent": True,
+        },
+        "config prompt test": {
+            "description": "Compare built-in and custom prompt results",
+            "is_idempotent": True,
+        },
+        "report submit": {
+            "description": "Submit a structured feedback report",
+            "is_idempotent": False,
+        },
+        "report list": {
+            "description": "List all submitted reports",
+            "is_idempotent": True,
+        },
+        "report show": {
+            "description": "Show a specific report by ID",
+            "is_idempotent": True,
+        },
+    }
 
 
 def get_app() -> App:
