@@ -17,8 +17,7 @@ import click
 import typer
 from typer.core import TyperGroup
 
-from web_clip_helper.app import get_app, get_reports_dir, get_crash_dumps_dir, get_state_dir, get_data_dir, get_config_dir
-from web_clip_helper.crash import flight_context
+from web_clip_helper.app import get_app, get_reports_dir, get_crash_dumps_dir, get_state_dir, get_data_dir, get_config_dir, flight_update, flight_clear
 from web_clip_helper.error_codes import exit_code_for
 from web_clip_helper.output import jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning, jsonl_emit_dict
 
@@ -537,15 +536,15 @@ def clip(
 
     # --dry-run mode: plan-only, no real IO
     if dry_run:
-        flight_context.update(command="clip", url=url, text=text, phase="dry-run")
+        flight_update(command="clip", url=url, text=text, phase="dry-run")
         if url:
             plan_clip_url(url, config)
         else:
             plan_clip_text(text or "", config)
-        flight_context.clear()
+        flight_clear()
         return
 
-    flight_context.update(command="clip", url=url, text=text, phase="starting")
+    flight_update(command="clip", url=url, text=text, phase="starting")
 
     def _run_clip():
         if url:
@@ -569,7 +568,7 @@ def clip(
     executor.shutdown(wait=False)
     if result is None:
         raise typer.Exit(1)
-    flight_context.clear()
+    flight_clear()
 
 
 def _get_index():
@@ -834,7 +833,7 @@ def refresh_clips(
     from web_clip_helper.pipeline import clip_url
 
     config = get_config()
-    flight_context.update(command="refresh", phase="starting")
+    flight_update(command="refresh", phase="starting")
     idx = ClipIndex(config.db_path)
     try:
         refreshable = idx.get_refreshable_clips()
@@ -951,7 +950,7 @@ def refresh_clips(
             message=f"Refresh complete: {refreshed_count} refreshed, {failed_count} failed",
             re_enrich=re_enrich,
         )
-        flight_context.clear()
+        flight_clear()
 
     except Exception as exc:
         jsonl_emit_error(stage="refresh", detail=f"Refresh command failed: {exc}", error_code="REFRESH_ERROR")

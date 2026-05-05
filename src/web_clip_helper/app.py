@@ -16,7 +16,13 @@ from agentsdk import App, Sandbox
 from web_clip_helper.config import Config
 from web_clip_helper.error_codes import ErrorCode, EXIT_CODE_MAP
 
-__all__ = ["get_app", "get_sandbox", "get_writer"]
+__all__ = [
+    "get_app",
+    "get_sandbox",
+    "get_writer",
+    "flight_update",
+    "flight_clear",
+]
 
 # ── Module-level singletons ───────────────────────────────────────
 _app: Optional[App] = None
@@ -383,3 +389,24 @@ def get_config_dir() -> Path:
     SDK sandbox layout.
     """
     return Path(get_sandbox().data_dir)
+
+
+# ── Flight context helpers (replacing crash.py FlightContext) ──────
+# SDK FlightContext exposes set(key, value) / get(key) / snapshot() /
+# delete(key).  The old crash.py FlightContext had update(**kwargs) and
+# clear().  These thin wrappers bridge the gap so cli.py call-sites
+# don't need to learn the low-level API.
+
+
+def flight_update(**kwargs: Any) -> None:
+    """Update SDK FlightContext with multiple key-value pairs."""
+    fc = get_app().flight_context
+    for k, v in kwargs.items():
+        fc.set(k, v)
+
+
+def flight_clear() -> None:
+    """Clear all SDK FlightContext entries."""
+    fc = get_app().flight_context
+    for key in list(fc.snapshot().keys()):
+        fc.delete(key)
