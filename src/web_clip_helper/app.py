@@ -74,8 +74,10 @@ def _register_providers(app: App) -> None:
     app.register_health_check("llm_connectivity", _check_llm_connectivity)
 
     # (c) CommandMeta for all business commands
+    from agentsdk.agent_commands import CommandMeta
+
     for cmd_path, meta in _build_command_meta().items():
-        app.register_command_meta(cmd_path, meta)
+        app.register_command_meta(cmd_path, CommandMeta(**meta))
 
 
 # ── Health check functions (migrated from cli.py) ─────────────────
@@ -230,72 +232,78 @@ def _check_llm_connectivity() -> dict[str, Any]:
 def _build_command_meta() -> dict[str, dict[str, Any]]:
     """Return command metadata for all business commands.
 
-    Each key is the CLI command path (e.g. ``"clip"``, ``"config list"``).
-    Each value is a dict with ``description``, ``is_idempotent``, and
-    ``parameters`` — matching the schema previously in agent_schema.py.
+    Each key is the CLI command path matching what SDK _walk_commands produces
+    (e.g. ``"web-clip-helper clip"``, ``"web-clip-helper config list"``).
+    Each value is a dict with ``description`` and ``is_idempotent`` — matching
+    the schema previously in agent_schema.py.
+
+    The SDK _schema_command merges CommandMeta by matching the ``path`` field
+    from _walk_commands against the keys here, so they must include the tool
+    name prefix.
     """
+    tool = "web-clip-helper"
     return {
-        "clip": {
+        f"{tool} clip": {
             "description": "Clip a URL or raw text into Markdown + storage",
             "is_idempotent": False,
         },
-        "list": {
+        f"{tool} list": {
             "description": "List clipped items with optional filters and pagination",
             "is_idempotent": True,
         },
-        "get": {
+        f"{tool} get": {
             "description": "Get a single clipped item by ID",
             "is_idempotent": True,
         },
-        "search": {
+        f"{tool} search": {
             "description": "Search clipped items by keyword in title and URL",
             "is_idempotent": True,
         },
-        "tags": {
+        f"{tool} tags": {
             "description": "List all unique tags with usage counts",
             "is_idempotent": True,
         },
-        "delete": {
+        f"{tool} delete": {
             "description": "Delete a clipped item by ID. Removes record from DB and folder from disk",
             "is_idempotent": True,
         },
-        "update": {
+        f"{tool} update": {
             "description": "Update clip fields (title, tags, category, dynamic flag, refresh interval)",
             "is_idempotent": True,
         },
-        "refresh": {
+        f"{tool} refresh": {
             "description": "Refresh dynamic clipped items that are due for re-clip",
             "is_idempotent": True,
         },
-        "version": {
+        f"{tool} version": {
             "description": "Print the current version",
             "is_idempotent": True,
         },
-        "config list": {
+        f"{tool} config list": {
             "description": "List all configuration values (api_key is masked)",
             "is_idempotent": True,
         },
-        "config get": {
+        f"{tool} config get": {
             "description": "Get a single configuration value by dot-path key",
             "is_idempotent": True,
         },
-        "config set": {
+        f"{tool} config set": {
             "description": "Set a configuration value by dot-path key and save to file",
             "is_idempotent": True,
         },
-        "config prompt test": {
+        f"{tool} config prompt test": {
             "description": "Compare built-in and custom prompt results",
             "is_idempotent": True,
         },
-        "report submit": {
+        f"{tool} report submit": {
             "description": "Submit a structured feedback report",
             "is_idempotent": False,
         },
-        "report list": {
+        f"{tool} report list": {
             "description": "List all submitted reports",
             "is_idempotent": True,
         },
-        "report show": {
+        f"{tool} report show": {
             "description": "Show a specific report by ID",
             "is_idempotent": True,
         },
