@@ -61,9 +61,10 @@ def get_trace_id() -> str | None:
 
 # ── Core emit (backward-compatible) ──────────────────────────────
 
-# Only "result" is a first-class envelope type now.
-# help/schema/dict convenience wrappers all delegate to jsonl_emit("result", ...).
-_RESULT_LIKE_TYPES = frozenset({"result"})
+# "result", "help", "schema", "dict" all map to writer.success(data=kwargs).
+# help/schema/dict are accepted directly by jsonl_emit() so callers can use
+# either the generic entry-point or the convenience wrappers.
+_RESULT_LIKE_TYPES = frozenset({"result", "help", "schema", "dict"})
 
 
 def jsonl_emit(type: str, **kwargs: object) -> None:  # noqa: A002
