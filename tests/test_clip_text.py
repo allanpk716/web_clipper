@@ -56,8 +56,8 @@ class TestClipTextOption:
 class TestClipUrlBackwardCompat:
     """Verify that clip <url> still works after the --text change."""
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_clip_url_still_works(
         self,
         mock_route: MagicMock,

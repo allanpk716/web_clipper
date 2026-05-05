@@ -109,7 +109,7 @@ class TestPromptRendering:
 
     def test_unknown_placeholder_logs_warning(self) -> None:
         """Unknown placeholder keys trigger a logger.warning."""
-        with patch("web_clip_helper.llm.logger") as mock_logger:
+        with patch("web_clip_helper.services.llm.logger") as mock_logger:
             sd = _SafeDict({"content": "hello"})
             result = sd["nonexistent_key"]
             assert result == ""
@@ -138,7 +138,7 @@ class TestPromptRendering:
 class TestPipelineIntegration:
     """Pipeline wiring passes config.prompts to LLMClient."""
 
-    @patch("web_clip_helper.pipeline.LLMClient")
+    @patch("web_clip_helper.services.clip.LLMClient")
     def test_pipeline_passes_prompts_to_llm_client(self, mock_llm_cls: MagicMock) -> None:
         """_enrich_with_llm constructs LLMClient with config.prompts."""
         from web_clip_helper.pipeline import _enrich_with_llm

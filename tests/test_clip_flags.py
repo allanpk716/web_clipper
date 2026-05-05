@@ -50,8 +50,8 @@ def _capture_jsonl(capsys):
 class TestNoImagesFlag:
     """Tests for skip_images parameter propagation and behavior."""
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_skip_images_does_not_call_download_images(
         self,
         mock_route: MagicMock,
@@ -75,8 +75,8 @@ class TestNoImagesFlag:
         assert result is not None
         assert result.image_count == 0
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_skip_images_preserves_remote_urls(
         self,
         mock_route: MagicMock,
@@ -102,8 +102,8 @@ class TestNoImagesFlag:
         assert "https://example.com/logo.png" in md_content
         assert "images/" not in md_content.split("https://example.com/logo.png")[0][-20:]
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_skip_images_reports_zero_count(
         self,
         mock_route: MagicMock,
@@ -132,8 +132,8 @@ class TestNoImagesFlag:
         assert len(result_lines) == 1
         assert result_lines[0]["image_count"] == 0
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_default_downloads_images(
         self,
         mock_route: MagicMock,
@@ -157,8 +157,8 @@ class TestNoImagesFlag:
         assert result is not None
         assert result.image_count == 1
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_skip_images_empty_images_dir(
         self,
         mock_route: MagicMock,
@@ -197,7 +197,7 @@ class TestTimeoutFlag:
             time.sleep(5)
             return None
 
-        with patch("web_clip_helper.pipeline.clip_url", side_effect=_slow_clip):
+        with patch("web_clip_helper.services.clip.clip_url", side_effect=_slow_clip):
             runner = CliRunner()
             result = runner.invoke(app, ["clip", "https://example.com/slow-test-timeout", "--timeout", "1"])
 
@@ -209,8 +209,8 @@ class TestTimeoutFlag:
         assert error_lines[0]["error_code"] == "TIMEOUT_ERROR"
         assert "1s" in error_lines[0]["detail"]
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_normal_completes_within_timeout(
         self,
         mock_route: MagicMock,
@@ -237,8 +237,8 @@ class TestTimeoutFlag:
         error_lines = [l for l in lines if l.get("type") == "error" and l.get("error_code") == "TIMEOUT_ERROR"]
         assert len(error_lines) == 0
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_default_timeout_is_60(
         self,
         mock_route: MagicMock,
@@ -280,7 +280,7 @@ class TestTimeoutFlag:
             time.sleep(5)
             return None
 
-        with patch("web_clip_helper.pipeline.clip_url", side_effect=_slow_clip):
+        with patch("web_clip_helper.services.clip.clip_url", side_effect=_slow_clip):
             runner = CliRunner()
             result = runner.invoke(app, ["clip", "https://example.com/slow-test-stage", "--timeout", "1"])
 

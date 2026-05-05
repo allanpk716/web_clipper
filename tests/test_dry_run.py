@@ -64,7 +64,7 @@ def _validate_all_jsonl(output: str) -> list[dict]:
 class TestDryRunURL:
     """Tests for --dry-run with URL input."""
 
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_dry_run_url_returns_plan(self, mock_route: MagicMock, config: Config) -> None:
         """--dry-run with URL emits a result with dry_run=True and plan dict."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
@@ -88,7 +88,7 @@ class TestDryRunURL:
         assert isinstance(plan["estimated_actions"], list)
         assert len(plan["estimated_actions"]) > 0
 
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_dry_run_url_no_real_io(self, mock_route: MagicMock, config: Config) -> None:
         """--dry-run must NOT call adapter.fetch, StorageManager, or ClipIndex.save_clip."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
@@ -97,9 +97,9 @@ class TestDryRunURL:
 
         with (
             patch("web_clip_helper.config.get_config", return_value=config),
-            patch("web_clip_helper.pipeline.StorageManager") as mock_storage,
-            patch("web_clip_helper.pipeline.LLMClient") as mock_llm,
-            patch("web_clip_helper.pipeline.download_images") as mock_dl,
+            patch("web_clip_helper.services.clip.StorageManager") as mock_storage,
+            patch("web_clip_helper.services.clip.LLMClient") as mock_llm,
+            patch("web_clip_helper.services.clip.download_images") as mock_dl,
         ):
             _run_clip("--dry-run", "https://example.com/article")
 
@@ -107,7 +107,7 @@ class TestDryRunURL:
             mock_llm.assert_not_called()
             mock_dl.assert_not_called()
 
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_dry_run_url_detects_duplicate(self, mock_route: MagicMock, config: Config) -> None:
         """--dry-run detects existing URL in the index (read-only check)."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
@@ -180,9 +180,9 @@ class TestDryRunText:
         """--dry-run text must NOT call StorageManager, LLMClient, or download_images."""
         with (
             patch("web_clip_helper.config.get_config", return_value=config),
-            patch("web_clip_helper.pipeline.StorageManager") as mock_storage,
-            patch("web_clip_helper.pipeline.LLMClient") as mock_llm,
-            patch("web_clip_helper.pipeline.download_images") as mock_dl,
+            patch("web_clip_helper.services.clip.StorageManager") as mock_storage,
+            patch("web_clip_helper.services.clip.LLMClient") as mock_llm,
+            patch("web_clip_helper.services.clip.download_images") as mock_dl,
         ):
             _run_clip("--dry-run", "--text", "Some text content")
 
@@ -219,7 +219,7 @@ class TestDryRunText:
 class TestDryRunJSONLPurity:
     """Verify all dry-run output is valid JSONL."""
 
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_dry_run_url_all_lines_valid_jsonl(self, mock_route: MagicMock, config: Config) -> None:
         """Every stdout line from --dry-run URL is valid JSON."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
@@ -240,7 +240,7 @@ class TestDryRunJSONLPurity:
         parsed = _validate_all_jsonl(output)
         assert len(parsed) >= 2  # At least progress + result
 
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_dry_run_result_has_envelope_fields(self, mock_route: MagicMock, config: Config) -> None:
         """Result lines include version, tool, and timestamp envelope fields."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
@@ -267,7 +267,7 @@ class TestDryRunJSONLPurity:
 class TestPlanFunctions:
     """Tests for plan_clip_url and plan_clip_text functions directly."""
 
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_plan_clip_url_emits_plan(self, mock_route: MagicMock, config: Config, capsys: pytest.CaptureFixture[str]) -> None:
         """plan_clip_url emits JSONL result with dry_run=True."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
@@ -304,7 +304,7 @@ class TestPlanFunctions:
         with pytest.raises(SystemExit):
             plan_clip_text("", config)
 
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_plan_clip_url_routing_error_raises(self, mock_route: MagicMock, config: Config) -> None:
         """plan_clip_url raises SystemExit on routing error."""
         from web_clip_helper.pipeline import plan_clip_url
@@ -314,7 +314,7 @@ class TestPlanFunctions:
         with pytest.raises(SystemExit):
             plan_clip_url("invalid-url", config)
 
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_plan_clip_url_duplicate_check_failure_non_fatal(self, mock_route: MagicMock, config: Config, capsys: pytest.CaptureFixture[str]) -> None:
         """Duplicate check failure in plan_clip_url is non-fatal."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
@@ -322,7 +322,7 @@ class TestPlanFunctions:
 
         mock_route.return_value = GenericWebAdapter
 
-        with patch("web_clip_helper.pipeline.ClipIndex", side_effect=Exception("DB error")):
+        with patch("web_clip_helper.services.clip.ClipIndex", side_effect=Exception("DB error")):
             plan_clip_url("https://example.com/test", config)
 
         captured = capsys.readouterr()
@@ -338,7 +338,7 @@ class TestPlanFunctions:
 class TestNoSideEffects:
     """Verify dry-run produces no side effects (no files, no DB records)."""
 
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_dry_run_creates_no_storage_files(self, mock_route: MagicMock, config: Config, tmp_path: Path) -> None:
         """--dry-run does not create any files in storage_path."""
         from web_clip_helper.adapters.generic import GenericWebAdapter
@@ -352,7 +352,7 @@ class TestNoSideEffects:
         if storage_dir.exists():
             assert not any(storage_dir.iterdir()), "dry-run should not create storage files"
 
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_dry_run_creates_no_db_records(self, mock_route: MagicMock, config: Config) -> None:
         """--dry-run does not create any records in SQLite."""
         from web_clip_helper.adapters.generic import GenericWebAdapter

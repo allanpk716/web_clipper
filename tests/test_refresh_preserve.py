@@ -92,7 +92,7 @@ class TestDefaultPreserve:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
             result = runner.invoke(app, ["refresh"])
 
         assert result.exit_code == 0
@@ -112,7 +112,7 @@ class TestDefaultPreserve:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
             result = runner.invoke(app, ["refresh"])
 
         assert result.exit_code == 0
@@ -132,7 +132,7 @@ class TestDefaultPreserve:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
             result = runner.invoke(app, ["refresh"])
 
         assert result.exit_code == 0
@@ -152,7 +152,7 @@ class TestDefaultPreserve:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
             result = runner.invoke(app, ["refresh"])
 
         assert result.exit_code == 0
@@ -172,7 +172,7 @@ class TestDefaultPreserve:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
             result = runner.invoke(app, ["refresh"])
 
         assert result.exit_code == 0
@@ -203,7 +203,7 @@ class TestReEnrich:
         mock_llm_client.extract_tags.return_value = ["new-tag-1", "new-tag-2"]
         mock_llm_client.classify_content.return_value = "new-category"
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result), \
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result), \
              patch("web_clip_helper.llm.LLMClient", return_value=mock_llm_client):
             result = runner.invoke(app, ["refresh", "--re-enrich"])
 
@@ -228,7 +228,7 @@ class TestReEnrich:
         mock_llm_client.extract_tags.return_value = ["updated-tag"]
         mock_llm_client.classify_content.return_value = "technology"
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result), \
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result), \
              patch("web_clip_helper.llm.LLMClient", return_value=mock_llm_client):
             result = runner.invoke(app, ["refresh", "--re-enrich"])
 
@@ -253,7 +253,7 @@ class TestReEnrich:
         mock_llm_client.extract_tags.return_value = ["new"]
         mock_llm_client.classify_content.return_value = "new-cat"
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result), \
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result), \
              patch("web_clip_helper.llm.LLMClient", return_value=mock_llm_client):
             result = runner.invoke(app, ["refresh", "--re-enrich"])
 
@@ -278,7 +278,7 @@ class TestReEnrich:
         mock_llm_client.extract_tags.side_effect = RuntimeError("LLM unavailable")
         mock_llm_client.classify_content.return_value = "should-not-appear"
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result), \
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result), \
              patch("web_clip_helper.llm.LLMClient", return_value=mock_llm_client):
             result = runner.invoke(app, ["refresh", "--re-enrich"])
 
@@ -307,7 +307,7 @@ class TestJsonlOutput:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
             result = runner.invoke(app, ["refresh"])
 
         assert result.exit_code == 0
@@ -328,7 +328,7 @@ class TestJsonlOutput:
         mock_llm_client.extract_tags.return_value = ["new"]
         mock_llm_client.classify_content.return_value = "new"
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result), \
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result), \
              patch("web_clip_helper.llm.LLMClient", return_value=mock_llm_client):
             result = runner.invoke(app, ["refresh", "--re-enrich"])
 
@@ -345,7 +345,7 @@ class TestJsonlOutput:
 
         fake_result = _fake_clip_result(cli_env["storage_path"], clip_id)
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=fake_result):
+        with patch("web_clip_helper.services.clip.clip_url", return_value=fake_result):
             result = runner.invoke(app, ["refresh"])
 
         assert result.exit_code == 0

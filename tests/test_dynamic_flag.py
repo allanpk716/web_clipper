@@ -150,9 +150,9 @@ class TestGitHubAdapterIsDynamic:
 class TestPipelineIsDynamicPropagation:
     """Verify pipeline passes is_dynamic to save_clip."""
 
-    @patch("web_clip_helper.pipeline.ClipIndex")
-    @patch("web_clip_helper.pipeline.StorageManager")
-    @patch("web_clip_helper.pipeline._enrich_with_llm")
+    @patch("web_clip_helper.services.clip.ClipIndex")
+    @patch("web_clip_helper.services.clip.StorageManager")
+    @patch("web_clip_helper.services.clip._enrich_with_llm")
     def test_clip_url_passes_dynamic(
         self,
         mock_llm: MagicMock,
@@ -192,9 +192,9 @@ class TestPipelineIsDynamicPropagation:
         call_args = mock_index.save_clip.call_args[0][0]
         assert call_args["is_dynamic"] == 1
 
-    @patch("web_clip_helper.pipeline.ClipIndex")
-    @patch("web_clip_helper.pipeline.StorageManager")
-    @patch("web_clip_helper.pipeline._enrich_with_llm")
+    @patch("web_clip_helper.services.clip.ClipIndex")
+    @patch("web_clip_helper.services.clip.StorageManager")
+    @patch("web_clip_helper.services.clip._enrich_with_llm")
     def test_clip_text_keeps_dynamic_false(
         self,
         mock_llm: MagicMock,

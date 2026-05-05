@@ -661,7 +661,7 @@ class TestCLIRefresh:
             record_id=cid,
         )
 
-        with patch("web_clip_helper.pipeline.clip_url", return_value=mock_result) as mock_clip:
+        with patch("web_clip_helper.services.clip.clip_url", return_value=mock_result) as mock_clip:
             output = _run_cli("refresh")
             mock_clip.assert_called_once()
 
@@ -732,7 +732,7 @@ class TestCLIRefresh:
                 return None
             return mock_ok
 
-        with patch("web_clip_helper.pipeline.clip_url", side_effect=side_effect):
+        with patch("web_clip_helper.services.clip.clip_url", side_effect=side_effect):
             output = _run_cli("refresh")
 
         messages = _parse_jsonl(output)
@@ -755,7 +755,7 @@ class TestCLIRefresh:
         })
         idx.close()
 
-        with patch("web_clip_helper.pipeline.clip_url") as mock_clip:
+        with patch("web_clip_helper.services.clip.clip_url") as mock_clip:
             output = _run_cli("refresh")
             mock_clip.assert_not_called()
 

@@ -356,7 +356,7 @@ class TestSuccessScenarios:
             )
             return mock_result
 
-        with patch("web_clip_helper.pipeline.clip_text", side_effect=_mock_clip_text):
+        with patch("web_clip_helper.services.clip.clip_text", side_effect=_mock_clip_text):
             result = _run(["clip", "--text", "hello world"])
 
         assert result.exit_code == 0
@@ -608,7 +608,7 @@ class TestCrossCommandWorkflow:
                 record_id=cid,
             )
 
-        with patch("web_clip_helper.pipeline.clip_text", side_effect=_mock_clip_text) as mock_clip:
+        with patch("web_clip_helper.services.clip.clip_text", side_effect=_mock_clip_text) as mock_clip:
             clip_result = _run(["clip", "--text", "E2E test content"])
         mock_clip.assert_called_once()
         assert clip_result.exit_code == 0

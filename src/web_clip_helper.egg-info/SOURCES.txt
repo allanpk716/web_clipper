@@ -3,7 +3,6 @@ README.md
 pyproject.toml
 src/web_clip_helper/__init__.py
 src/web_clip_helper/adapter.py
-src/web_clip_helper/agent_schema.py
 src/web_clip_helper/app.py
 src/web_clip_helper/cli.py
 src/web_clip_helper/config.py
@@ -13,9 +12,9 @@ src/web_clip_helper/images.py
 src/web_clip_helper/index.py
 src/web_clip_helper/io_guard.py
 src/web_clip_helper/llm.py
+src/web_clip_helper/migration.py
 src/web_clip_helper/models.py
 src/web_clip_helper/output.py
-src/web_clip_helper/paths.py
 src/web_clip_helper/pipeline.py
 src/web_clip_helper/storage.py
 src/web_clip_helper/url_utils.py
@@ -62,13 +61,15 @@ tests/test_llm_missing_warning.py
 tests/test_llm_prompts.py
 tests/test_migration.py
 tests/test_output.py
-tests/test_paths.py
 tests/test_pipeline.py
 tests/test_quiet_mode.py
 tests/test_refresh_preserve.py
 tests/test_report_command.py
 tests/test_result_stage.py
+tests/test_sdk_agent_integration.py
 tests/test_sdk_app.py
+tests/test_sdk_cli_entry.py
+tests/test_sdk_output_bridge.py
 tests/test_search_fulltext.py
 tests/test_storage.py
 tests/test_subcommand_help.py

@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from typer.testing import CliRunner
 
-from web_clip_helper.cli import app
 from web_clip_helper.config import Config
 from web_clip_helper.error_codes import ErrorCode, EXIT_CODE_MAP, exit_code_for
 from web_clip_helper.index import ClipIndex
 from web_clip_helper.output import jsonl_emit_error
-
-runner = CliRunner()
+from tests.conftest import _unwrap_error_message
 
 
 # ── ErrorCode registry tests ───────────────────────────────────────
@@ -125,33 +121,37 @@ class TestExitCodeFor:
 class TestJsonlEmitErrorCode:
     """Verify jsonl_emit_error includes/omits error_code correctly."""
 
-    def test_with_error_code(self, capsys) -> None:
+    def test_with_error_code(self, _capture_jsonl) -> None:
         jsonl_emit_error(stage="test", detail="msg", error_code="INPUT_INVALID")
-        lines = capsys.readouterr().out.strip().split("\n")
-        obj = json.loads(lines[0])
-        assert obj["type"] == "error"
-        assert obj["error_code"] == "INPUT_INVALID"
-        assert obj["stage"] == "test"
-        assert obj["detail"] == "msg"
+        envelopes = _capture_jsonl()
+        env = envelopes[0]
+        assert env["type"] == "error"
+        assert env["error_code"] == "INPUT_INVALID"
+        stage, detail = _unwrap_error_message(env)
+        assert stage == "test"
+        assert detail == "msg"
 
-    def test_without_error_code_omits_field(self, capsys) -> None:
+    def test_without_error_code_still_has_field(self, _capture_jsonl) -> None:
+        """SDK writer.error() always sets error_code to 'error'."""
         jsonl_emit_error(stage="test", detail="msg")
-        lines = capsys.readouterr().out.strip().split("\n")
-        obj = json.loads(lines[0])
-        assert obj["type"] == "error"
-        assert "error_code" not in obj
+        envelopes = _capture_jsonl()
+        env = envelopes[0]
+        assert env["type"] == "error"
+        # SDK writer.error() sets error_code="error" for simple errors
+        assert env["error_code"] == "error"
 
-    def test_error_code_with_extra_kwargs(self, capsys) -> None:
+    def test_error_code_with_extra_kwargs(self, _capture_jsonl) -> None:
         jsonl_emit_error(
             stage="refresh",
             detail="failed",
             clip_id=42,
             error_code="REFRESH_ERROR",
         )
-        lines = capsys.readouterr().out.strip().split("\n")
-        obj = json.loads(lines[0])
-        assert obj["error_code"] == "REFRESH_ERROR"
-        assert obj["clip_id"] == 42
+        envelopes = _capture_jsonl()
+        env = envelopes[0]
+        assert env["error_code"] == "REFRESH_ERROR"
+        # Extra kwargs are folded into the message, not separate fields
+        assert "[refresh]" in env["message"]
 
 
 # ── CLI integration: error_code in CLI error output ───────────────
@@ -171,18 +171,10 @@ def cli_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path / "clips.db"
 
 
-def _run_cli(*args: str) -> str:
-    return runner.invoke(app, args).output
-
-
-def _parse_jsonl(output: str) -> list[dict]:
-    return [json.loads(line) for line in output.strip().splitlines() if line.strip()]
-
-
 class TestCLIErrorCodes:
     """Verify CLI commands emit correct error_code values."""
 
-    def test_update_no_options_emits_input_invalid(self, cli_config: Path) -> None:
+    def test_update_no_options_emits_input_invalid(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         cid = idx.save_clip({
             "url": "https://example.com", "title": "T",
@@ -190,18 +182,18 @@ class TestCLIErrorCodes:
         })
         idx.close()
 
-        output = _run_cli("update", str(cid))
-        errors = [m for m in _parse_jsonl(output) if m["type"] == "error"]
+        code, envelopes = run_sdk_cli(["update", str(cid)])
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert len(errors) == 1
         assert errors[0]["error_code"] == "INPUT_INVALID"
 
-    def test_get_nonexistent_emits_not_found(self, cli_config: Path) -> None:
-        output = _run_cli("get", "99999")
-        errors = [m for m in _parse_jsonl(output) if m["type"] == "error"]
+    def test_get_nonexistent_emits_not_found(self, cli_config: Path, run_sdk_cli) -> None:
+        code, envelopes = run_sdk_cli(["get", "99999"])
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert len(errors) == 1
         assert errors[0]["error_code"] == "NOT_FOUND"
 
-    def test_update_interval_zero_emits_input_invalid(self, cli_config: Path) -> None:
+    def test_update_interval_zero_emits_input_invalid(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
         cid = idx.save_clip({
             "url": "https://example.com", "title": "T",
@@ -209,21 +201,21 @@ class TestCLIErrorCodes:
         })
         idx.close()
 
-        output = _run_cli("update", str(cid), "--interval", "0")
-        errors = [m for m in _parse_jsonl(output) if m["type"] == "error"]
+        code, envelopes = run_sdk_cli(["update", str(cid), "--interval", "0"])
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert len(errors) == 1
         assert errors[0]["error_code"] == "INPUT_INVALID"
 
-    def test_update_nonexistent_emits_not_found(self, cli_config: Path) -> None:
-        output = _run_cli("update", "999", "--dynamic")
-        errors = [m for m in _parse_jsonl(output) if m["type"] == "error"]
+    def test_update_nonexistent_emits_not_found(self, cli_config: Path, run_sdk_cli) -> None:
+        code, envelopes = run_sdk_cli(["update", "999", "--dynamic"])
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert len(errors) == 1
         assert errors[0]["error_code"] == "NOT_FOUND"
 
-    def test_feedback_invalid_type_emits_input_invalid(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_feedback_invalid_type_emits_input_invalid(self, cli_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_sdk_cli) -> None:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        output = _run_cli("feedback", "Test", "--type", "invalid")
-        errors = [m for m in _parse_jsonl(output) if m["type"] == "error"]
+        code, envelopes = run_sdk_cli(["feedback", "Test", "--type", "invalid"])
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert len(errors) == 1
         assert errors[0]["error_code"] == "INPUT_INVALID"
 
@@ -234,19 +226,19 @@ class TestCLIErrorCodes:
 class TestPipelineErrorCodes:
     """Verify pipeline functions emit correct error_code values."""
 
-    def test_clip_text_empty_emits_input_invalid(self, capsys) -> None:
+    def test_clip_text_empty_emits_input_invalid(self, _capture_jsonl) -> None:
         from web_clip_helper.config import Config
         from web_clip_helper.pipeline import clip_text
 
         config = Config(db_path=":memory:", storage_path="/tmp/nonexistent")
         result = clip_text("", config)
         assert result is None
-        lines = capsys.readouterr().out.strip().split("\n")
-        errors = [json.loads(l) for l in lines if l.strip() and json.loads(l).get("type") == "error"]
+        envelopes = _capture_jsonl()
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert len(errors) == 1
         assert errors[0]["error_code"] == "INPUT_INVALID"
 
-    def test_clip_url_routing_failure_emits_routing_error(self, capsys) -> None:
+    def test_clip_url_routing_failure_emits_routing_error(self, _capture_jsonl) -> None:
         from web_clip_helper.config import Config
         from web_clip_helper.pipeline import clip_url
 
@@ -254,7 +246,7 @@ class TestPipelineErrorCodes:
         # Empty string triggers a ValueError in route_url
         result = clip_url("", config)
         assert result is None
-        lines = capsys.readouterr().out.strip().split("\n")
-        errors = [json.loads(l) for l in lines if l.strip() and json.loads(l).get("type") == "error"]
+        envelopes = _capture_jsonl()
+        errors = [e for e in envelopes if e["type"] == "error"]
         assert len(errors) >= 1
         assert errors[0]["error_code"] == "ROUTING_ERROR"

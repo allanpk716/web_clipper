@@ -16,8 +16,8 @@ from web_clip_helper.models import RawContent
 class TestResultStageField:
     """Verify that every jsonl_emit_result call includes a stage field."""
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_clip_result_has_stage(
         self,
         mock_route: MagicMock,

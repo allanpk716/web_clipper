@@ -48,8 +48,8 @@ class TestLLMMissingSummaryWarning:
         assert len(summary) >= 1, f"Expected summary warning with config guidance, got: {warnings}"
         assert "WEB_CLIP_LLM_API_KEY" in summary[0]["message"]
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_with_api_key_no_summary_warning(
         self,
         mock_route: MagicMock,
@@ -79,7 +79,7 @@ class TestLLMMissingSummaryWarning:
         mock_dl.return_value = {}
 
         with patch.object(GenericWebAdapter, "fetch", return_value=sample_raw):
-            with patch("web_clip_helper.pipeline.LLMClient") as MockLLM:
+            with patch("web_clip_helper.services.clip.LLMClient") as MockLLM:
                 mock_client = MockLLM.return_value
                 mock_client.generate_title.return_value = "Title"
                 mock_client.extract_tags.return_value = ["tag"]

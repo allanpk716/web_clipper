@@ -58,8 +58,8 @@ def _clip_first(url: str, config: Config, sample_raw: RawContent) -> ClipResult 
     from web_clip_helper.adapters.github import GitHubAdapter
 
     with (
-        patch("web_clip_helper.pipeline.route_url", return_value=GitHubAdapter),
-        patch("web_clip_helper.pipeline.download_images", return_value={}),
+        patch("web_clip_helper.services.clip.route_url", return_value=GitHubAdapter),
+        patch("web_clip_helper.services.clip.download_images", return_value={}),
         patch.object(GitHubAdapter, "fetch", return_value=sample_raw),
     ):
         return clip_url(url, config)
@@ -68,8 +68,8 @@ def _clip_first(url: str, config: Config, sample_raw: RawContent) -> ClipResult 
 class TestDuplicateDetection:
     """Duplicate URL returns existing record without re-fetching."""
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_second_clip_returns_duplicate_flag(
         self,
         mock_route: MagicMock,
@@ -102,8 +102,8 @@ class TestDuplicateDetection:
         assert second_result.get("duplicate") is True
         assert second_result.get("existing_id") == result1.record_id
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_second_clip_same_record_id(
         self,
         mock_route: MagicMock,
@@ -123,8 +123,8 @@ class TestDuplicateDetection:
         assert result2 is not None
         assert result2.record_id == result1.record_id
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_db_has_exactly_one_record(
         self,
         mock_route: MagicMock,
@@ -149,8 +149,8 @@ class TestDuplicateDetection:
 
         assert len(all_clips) == 1
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_second_clip_does_not_call_adapter(
         self,
         mock_route: MagicMock,
@@ -176,8 +176,8 @@ class TestDuplicateDetection:
         assert result2 is not None
         assert result2.record_id is not None
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_duplicate_progress_message(
         self,
         mock_route: MagicMock,
@@ -209,8 +209,8 @@ class TestDuplicateDetection:
 class TestCrossNormalization:
     """http→https and trailing slash variations resolve to the same record."""
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_http_vs_https_detected_as_duplicate(
         self,
         mock_route: MagicMock,
@@ -238,8 +238,8 @@ class TestCrossNormalization:
         index.close()
         assert len(all_clips) == 1
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_trailing_slash_detected_as_duplicate(
         self,
         mock_route: MagicMock,
@@ -275,8 +275,8 @@ class TestCrossNormalization:
 class TestDifferentUrlsNotDuplicate:
     """Different URLs should NOT be treated as duplicates."""
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_different_url_not_detected_as_duplicate(
         self,
         mock_route: MagicMock,
@@ -317,8 +317,8 @@ class TestDifferentUrlsNotDuplicate:
 class TestDuplicateCheckFailure:
     """Duplicate check failure must not block clipping."""
 
-    @patch("web_clip_helper.pipeline.download_images")
-    @patch("web_clip_helper.pipeline.route_url")
+    @patch("web_clip_helper.services.clip.download_images")
+    @patch("web_clip_helper.services.clip.route_url")
     def test_index_error_falls_through_to_normal_clip(
         self,
         mock_route: MagicMock,
@@ -334,7 +334,7 @@ class TestDuplicateCheckFailure:
         # Make find_by_url raise — but the clip should still work
         with (
             patch.object(GitHubAdapter, "fetch", return_value=sample_raw),
-            patch("web_clip_helper.pipeline.ClipIndex") as MockIndex,
+            patch("web_clip_helper.services.clip.ClipIndex") as MockIndex,
         ):
             # First call: find_by_url raises (simulating DB corruption)
             mock_instance = MagicMock()

@@ -90,7 +90,7 @@ class TestNoApiKey:
         client = LLMClient(_config(api_key=""))
         assert client.classify_content(SAMPLE_CHINESE, "article") == ""
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_no_openai_instantiation(self, mock_openai_cls: MagicMock) -> None:
         """Verify that OpenAI() is never called when api_key is empty."""
         client = LLMClient(_config(api_key=""))
@@ -106,7 +106,7 @@ class TestNoApiKey:
 class TestGenerateTitle:
     """LLM-generated title behaviour."""
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_successful_title(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -116,7 +116,7 @@ class TestGenerateTitle:
         title = client.generate_title(SAMPLE_CHINESE, "article")
         assert title == "人工智能简介"
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_title_truncated_to_50(self, mock_openai_cls: MagicMock) -> None:
         long_title = "这是一个非常非常非常非常非常非常非常非常非常非常长的标题超出了限制"
         mock_client = MagicMock()
@@ -127,7 +127,7 @@ class TestGenerateTitle:
         title = client.generate_title(SAMPLE_CHINESE, "article")
         assert len(title) <= 50
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_title_strips_quotes(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -137,7 +137,7 @@ class TestGenerateTitle:
         title = client.generate_title(SAMPLE_CHINESE, "article")
         assert title == "AI技术解析"
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_title_empty_response_fallback(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -147,7 +147,7 @@ class TestGenerateTitle:
         title = client.generate_title(SAMPLE_CHINESE, "article", url="https://example.com/a")
         assert "example.com" in title
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_title_none_response_fallback(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -157,7 +157,7 @@ class TestGenerateTitle:
         title = client.generate_title("content", "article")
         assert title == "content"
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_title_api_error_fallback(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -167,7 +167,7 @@ class TestGenerateTitle:
         title = client.generate_title("content here", "article", url="https://test.com")
         assert "test.com" in title
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_title_timeout_fallback(self, mock_openai_cls: MagicMock) -> None:
         import openai
 
@@ -186,7 +186,7 @@ class TestGenerateTitle:
 class TestExtractTags:
     """Tag extraction behaviour."""
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_successful_tags(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -198,7 +198,7 @@ class TestExtractTags:
         tags = client.extract_tags(SAMPLE_CHINESE, "article")
         assert tags == ["人工智能", "机器学习", "深度学习"]
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_tags_capped_at_8(self, mock_openai_cls: MagicMock) -> None:
         nine_tags = json.dumps([f"tag{i}" for i in range(9)])
         mock_client = MagicMock()
@@ -209,7 +209,7 @@ class TestExtractTags:
         tags = client.extract_tags(SAMPLE_ENGLISH, "article")
         assert len(tags) == 8
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_tags_malformed_json_fallback(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -223,7 +223,7 @@ class TestExtractTags:
         assert isinstance(tags, list)
         assert len(tags) >= 1  # comma-split produces results
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_tags_empty_response(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -233,7 +233,7 @@ class TestExtractTags:
         tags = client.extract_tags(SAMPLE_CHINESE, "article")
         assert tags == []
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_tags_api_error_returns_empty(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -243,7 +243,7 @@ class TestExtractTags:
         tags = client.extract_tags(SAMPLE_CHINESE, "article")
         assert tags == []
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_tags_embedded_json_array(self, mock_openai_cls: MagicMock) -> None:
         """LLM sometimes wraps JSON in text like 'Here are the tags: [...]'."""
         mock_client = MagicMock()
@@ -265,7 +265,7 @@ class TestExtractTags:
 class TestClassifyContent:
     """Content classification behaviour."""
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_successful_classification(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -275,7 +275,7 @@ class TestClassifyContent:
         cat = client.classify_content(SAMPLE_CHINESE, "article")
         assert cat == "技术"
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_classification_strips_quotes(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -285,7 +285,7 @@ class TestClassifyContent:
         cat = client.classify_content(SAMPLE_CHINESE, "article")
         assert cat == "科学"
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_classification_empty_response(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -295,7 +295,7 @@ class TestClassifyContent:
         cat = client.classify_content(SAMPLE_CHINESE, "article")
         assert cat == ""
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_classification_none_response(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -305,7 +305,7 @@ class TestClassifyContent:
         cat = client.classify_content(SAMPLE_CHINESE, "article")
         assert cat == ""
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_classification_api_error(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -322,7 +322,7 @@ class TestClassifyContent:
 class TestContentTruncation:
     """Content is truncated before being sent to the LLM."""
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_long_content_is_truncated(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -343,7 +343,7 @@ class TestContentTruncation:
         assert len(user_msg) <= MAX_CONTENT_CHARS + 200  # allow for prefix text
         assert "...(内容已截断)" in user_msg
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_short_content_not_truncated(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -395,7 +395,7 @@ class TestTitleFallback:
 class TestClientInit:
     """OpenAI client is lazily initialised with correct params."""
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_client_created_with_config(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -410,7 +410,7 @@ class TestClientInit:
             base_url=cfg.base_url,
         )
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_client_reused_across_calls(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -431,7 +431,7 @@ class TestClientInit:
 class TestMixedContent:
     """Verify methods work with various content types."""
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_chinese_content_title(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -440,7 +440,7 @@ class TestMixedContent:
         client = LLMClient(_config())
         assert client.generate_title(SAMPLE_CHINESE, "article") == "AI技术概述"
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_english_content_tags(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -452,7 +452,7 @@ class TestMixedContent:
         tags = client.extract_tags(SAMPLE_ENGLISH, "article")
         assert len(tags) == 3
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_mixed_content_classification(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -461,7 +461,7 @@ class TestMixedContent:
         client = LLMClient(_config())
         assert client.classify_content(SAMPLE_MIXED, "article") == "技术"
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_tweet_source_type(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -471,7 +471,7 @@ class TestMixedContent:
         title = client.generate_title("Just shipped a new feature!", "tweet")
         assert title == "今日动态"
 
-    @patch("web_clip_helper.llm.OpenAI")
+    @patch("web_clip_helper.services.llm.OpenAI")
     def test_wechat_source_type(self, mock_openai_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
