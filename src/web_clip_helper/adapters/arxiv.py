@@ -28,7 +28,7 @@ from .base import AdapterError, register_adapter
 from ..config import get_config
 from ..llm import LLMClient
 from ..models import RawContent
-from ..output import jsonl_emit_error, jsonl_emit_progress, jsonl_emit_warning
+from ..output import jsonl_emit_progress, jsonl_emit_warning
 
 __all__ = ["ArxivAdapter"]
 
@@ -145,17 +145,16 @@ def _fetch_abs_page(client: httpx.Client, paper_id: str) -> str:
         resp.raise_for_status()
         return resp.text
     except httpx.HTTPStatusError as exc:
-        msg = f"arxiv abs page returned HTTP {exc.response.status_code} for {url}"
-        jsonl_emit_error(stage="fetch", detail=msg, url=url, status_code=exc.response.status_code)
-        raise AdapterError(msg) from exc
+        status = exc.response.status_code
+        msg = f"arxiv abs page returned HTTP {status} for {url}"
+        code = "NOT_FOUND" if status in (404, 410) else "FETCH_ERROR"
+        raise AdapterError(msg, error_code=code, url=url) from exc
     except httpx.TimeoutException as exc:
         msg = f"Timeout fetching arxiv abs page {url} (>{_TIMEOUT}s)"
-        jsonl_emit_error(stage="fetch", detail=msg, url=url)
-        raise AdapterError(msg) from exc
+        raise AdapterError(msg, error_code="FETCH_ERROR", url=url) from exc
     except httpx.RequestError as exc:
         msg = f"Network error fetching arxiv abs page {url}: {exc}"
-        jsonl_emit_error(stage="fetch", detail=msg, url=url)
-        raise AdapterError(msg) from exc
+        raise AdapterError(msg, error_code="FETCH_ERROR", url=url) from exc
 
 
 def _parse_metadata(html: str) -> dict:
@@ -253,8 +252,7 @@ def _download_pdf(client: httpx.Client, paper_id: str) -> bytes:
                 f"arxiv PDF download returned non-PDF content "
                 f"(content-type: {content_type}) for {url}"
             )
-            jsonl_emit_error(stage="fetch", detail=msg, url=url, content_type=content_type)
-            raise AdapterError(msg)
+            raise AdapterError(msg, error_code="FETCH_ERROR", url=url)
 
         jsonl_emit_progress(
             message=f"PDF downloaded: {len(resp.content):,} bytes",
@@ -265,22 +263,19 @@ def _download_pdf(client: httpx.Client, paper_id: str) -> bytes:
         return resp.content
 
     except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
         msg = (
-            f"arxiv PDF download failed with HTTP {exc.response.status_code} "
+            f"arxiv PDF download failed with HTTP {status} "
             f"for {url}"
         )
-        jsonl_emit_error(
-            stage="fetch", detail=msg, url=url, status_code=exc.response.status_code
-        )
-        raise AdapterError(msg) from exc
+        code = "NOT_FOUND" if status in (404, 410) else "FETCH_ERROR"
+        raise AdapterError(msg, error_code=code, url=url) from exc
     except httpx.TimeoutException as exc:
         msg = f"Timeout downloading arxiv PDF {url} (>{_TIMEOUT}s)"
-        jsonl_emit_error(stage="fetch", detail=msg, url=url)
-        raise AdapterError(msg) from exc
+        raise AdapterError(msg, error_code="FETCH_ERROR", url=url) from exc
     except httpx.RequestError as exc:
         msg = f"Network error downloading arxiv PDF {url}: {exc}"
-        jsonl_emit_error(stage="fetch", detail=msg, url=url)
-        raise AdapterError(msg) from exc
+        raise AdapterError(msg, error_code="FETCH_ERROR", url=url) from exc
 
 
 def _generate_chinese_summary(abstract: str, title: str) -> str:

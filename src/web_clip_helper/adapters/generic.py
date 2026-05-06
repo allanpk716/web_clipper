@@ -17,7 +17,7 @@ from readability import Document
 
 from .base import AdapterError
 from ..models import RawContent
-from ..output import jsonl_emit_error, jsonl_emit_progress, jsonl_emit_warning
+from ..output import jsonl_emit_progress, jsonl_emit_warning
 
 __all__ = ["GenericWebAdapter"]
 
@@ -173,5 +173,4 @@ class GenericWebAdapter:
                     continue
 
         msg = f"Failed to fetch {url}: {last_exc}"
-        jsonl_emit_error(stage="fetch", detail=msg, url=url)
-        raise AdapterError(msg)
+        raise AdapterError(msg, error_code="FETCH_ERROR", url=url)

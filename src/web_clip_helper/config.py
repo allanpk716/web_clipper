@@ -166,7 +166,7 @@ def get_config(path: Path | str | None = None) -> Config:
             pass
         except Exception:
             # Non-fatal: migration failure shouldn't block startup
-            logger.warning("Config migration failed, continuing with current config", exc_info=True)
+            logger.warning("Config migration failed, continuing with current config")
         _cached_config = Config.load(path)
     return _cached_config
 

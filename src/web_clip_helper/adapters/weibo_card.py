@@ -32,7 +32,7 @@ from markdownify import markdownify as md
 
 from .base import AdapterError, register_adapter
 from ..models import RawContent
-from ..output import jsonl_emit_error, jsonl_emit_progress, jsonl_emit_warning
+from ..output import jsonl_emit_progress, jsonl_emit_warning
 
 __all__ = ["WeiboCardAdapter"]
 
@@ -174,8 +174,7 @@ class WeiboCardAdapter:
             article_id = _extract_article_id(url)
         except AdapterError:
             msg = f"Cannot extract article ID from URL: {url}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise
+            raise AdapterError(msg, error_code="INPUT_INVALID", url=url) from None
 
         api_url = f"{_API_BASE}?id={article_id}"
 
@@ -197,27 +196,24 @@ class WeiboCardAdapter:
                 data = resp.json()
         except httpx.TimeoutException as exc:
             msg = f"Weibo Card fetch timeout: {exc}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg) from exc
+            raise AdapterError(msg, error_code="FETCH_ERROR", url=url) from exc
         except httpx.HTTPStatusError as exc:
-            msg = f"Weibo Card API returned HTTP {exc.response.status_code}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg) from exc
+            status = exc.response.status_code
+            msg = f"Weibo Card API returned HTTP {status}"
+            code = "NOT_FOUND" if status in (404, 410) else "FETCH_ERROR"
+            raise AdapterError(msg, error_code=code, url=url) from exc
         except httpx.RequestError as exc:
             msg = f"Weibo Card fetch failed: {exc}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg) from exc
+            raise AdapterError(msg, error_code="FETCH_ERROR", url=url) from exc
         except (ValueError, KeyError) as exc:
             msg = f"Weibo Card API returned invalid JSON: {exc}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg) from exc
+            raise AdapterError(msg, error_code="PARSE_ERROR", url=url) from exc
 
         # Check API response code (string or int — Weibo returns "100000" as string)
         api_code = data.get("code")
         if str(api_code) != "100000":
             msg = f"Weibo Card API error: code={api_code}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg)
+            raise AdapterError(msg, error_code="NOT_FOUND", url=url)
 
         article = data.get("data", data)
 
@@ -227,8 +223,7 @@ class WeiboCardAdapter:
 
         if not content_html:
             msg = "Weibo Card article missing content"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg)
+            raise AdapterError(msg, error_code="PARSE_ERROR", url=url)
 
         # Author from userinfo
         userinfo = article.get("userinfo", {})

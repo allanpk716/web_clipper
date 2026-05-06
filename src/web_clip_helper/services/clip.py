@@ -16,7 +16,9 @@ from datetime import datetime
 from pathlib import Path
 
 from web_clip_helper.adapters.base import AdapterError, route_url
+from web_clip_helper.app import flight_update
 from web_clip_helper.config import Config
+from web_clip_helper.error_codes import exit_code_for
 from web_clip_helper.services.images import download_images
 from web_clip_helper.repository.index import ClipIndex
 from web_clip_helper.services.llm import LLMClient
@@ -124,6 +126,7 @@ def clip_url(url: str, config: Config, *, skip_images: bool = False) -> ClipResu
         adapter_cls = route_url(url)
     except ValueError as exc:
         jsonl_emit_error(stage="routing", detail=str(exc), error_code="ROUTING_ERROR")
+        flight_update(last_error_code="ROUTING_ERROR")
         return None
 
     jsonl_emit_progress(
@@ -136,10 +139,13 @@ def clip_url(url: str, config: Config, *, skip_images: bool = False) -> ClipResu
         adapter = adapter_cls()
         raw: RawContent = adapter.fetch(url)
     except AdapterError as exc:
-        jsonl_emit_error(stage="fetch", detail=str(exc), error_code="FETCH_ERROR")
+        error_code = exc.error_code or "FETCH_ERROR"
+        jsonl_emit_error(stage="fetch", detail=str(exc), error_code=error_code)
+        flight_update(last_error_code=error_code)
         return None
     except Exception as exc:
         jsonl_emit_error(stage="fetch", detail=f"Unexpected error: {exc}", error_code="INTERNAL_ERROR")
+        flight_update(last_error_code="INTERNAL_ERROR")
         return None
 
     jsonl_emit_progress(
@@ -168,6 +174,7 @@ def clip_text(text: str, config: Config) -> ClipResult | None:
     """
     if not text or not text.strip():
         jsonl_emit_error(stage="clip_text", detail="Empty text input", error_code="INPUT_INVALID")
+        flight_update(last_error_code="INPUT_INVALID")
         return None
 
     jsonl_emit_progress(message="Starting clip for raw text", percent=0)
@@ -241,6 +248,7 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
         entry_path = storage.create_entry(title, raw.fetched_at)
     except OSError as exc:
         jsonl_emit_error(stage="storage", detail=str(exc), error_code="STORAGE_ERROR")
+        flight_update(last_error_code="STORAGE_ERROR")
         return None
 
     jsonl_emit_progress(
@@ -289,6 +297,7 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
         md_path = storage.save_markdown(entry_path, content_md, metadata)
     except OSError as exc:
         jsonl_emit_error(stage="storage", detail=str(exc), error_code="STORAGE_ERROR")
+        flight_update(last_error_code="STORAGE_ERROR")
         return None
 
     jsonl_emit_progress(
@@ -313,6 +322,7 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
                     detail=f"Failed to save extra file {fname}: {exc}",
                     error_code="STORAGE_ERROR",
                 )
+                flight_update(last_error_code="STORAGE_ERROR")
                 return None
 
     # 7. Save to SQLite index
@@ -333,6 +343,7 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
         index.close()
     except Exception as exc:
         jsonl_emit_error(stage="index", detail=str(exc), error_code="INDEX_ERROR")
+        flight_update(last_error_code="INDEX_ERROR")
         return None
 
     jsonl_emit_progress(
@@ -404,7 +415,8 @@ def plan_clip_url(url: str, config: Config) -> None:
         adapter_cls = route_url(url)
     except ValueError as exc:
         jsonl_emit_error(stage="routing", detail=str(exc), error_code="ROUTING_ERROR")
-        raise SystemExit(1)
+        flight_update(last_error_code="ROUTING_ERROR")
+        raise SystemExit(exit_code_for("ROUTING_ERROR"))
 
     adapter_name = adapter_cls.__name__
     source_type = getattr(adapter_cls, "source_type", "generic")
@@ -475,7 +487,8 @@ def plan_clip_text(text: str, config: Config) -> None:
     """
     if not text or not text.strip():
         jsonl_emit_error(stage="clip_text", detail="Empty text input", error_code="INPUT_INVALID")
-        raise SystemExit(1)
+        flight_update(last_error_code="INPUT_INVALID")
+        raise SystemExit(exit_code_for("INPUT_INVALID"))
 
     estimated_title = text.strip()[:50].replace("\n", " ") or "text-clip"
 

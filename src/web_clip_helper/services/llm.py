@@ -199,7 +199,7 @@ class LLMClient:
                 return choice.message.content
             return None
         except Exception:
-            logger.warning("LLM call failed", exc_info=True)
+            logger.warning("LLM call failed")
             return None
 
     @staticmethod

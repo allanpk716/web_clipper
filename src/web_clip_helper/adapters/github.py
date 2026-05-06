@@ -20,7 +20,7 @@ import httpx
 
 from .base import AdapterError, register_adapter
 from ..models import RawContent
-from ..output import jsonl_emit_error, jsonl_emit_progress, jsonl_emit_warning
+from ..output import jsonl_emit_progress, jsonl_emit_warning
 
 __all__ = ["GitHubAdapter"]
 
@@ -201,8 +201,7 @@ class GitHubAdapter:
             f"tried branches {_BRANCHES_TO_TRY} "
             f"and variants {_README_VARIANTS}"
         )
-        jsonl_emit_error(stage="fetch", detail=msg, url=f"https://github.com/{owner}/{repo}")
-        raise AdapterError(msg)
+        raise AdapterError(msg, error_code="NOT_FOUND", url=f"https://github.com/{owner}/{repo}")
 
     def _fetch_metadata(self, owner: str, repo: str) -> dict[str, object]:
         """Fetch repo metadata from the GitHub API.

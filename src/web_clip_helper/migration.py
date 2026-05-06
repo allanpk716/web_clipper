@@ -268,7 +268,7 @@ def run_migration(sandbox: Any | None = None) -> bool:
 
         sandbox = Sandbox(_APP_NAME)
 
-    marker_status = _read_marker(sandbox.base_dir)
+    marker_status = _read_marker(Path(sandbox.base_dir))
 
     # Already fully migrated — skip
     if marker_status == _MARKER_OK:
@@ -286,14 +286,14 @@ def run_migration(sandbox: Any | None = None) -> bool:
     )
 
     if not has_legacy:
-        _write_marker(sandbox.base_dir, _MARKER_OK)
+        _write_marker(Path(sandbox.base_dir), _MARKER_OK)
         _emit("No legacy XDG data found, marking migration as done")
         return True
 
     _emit("Starting XDG → Sandbox migration")
 
     # Step 1: Migrate config
-    config_ok = _migrate_config(xdg_config_dir, sandbox.base_dir)
+    config_ok = _migrate_config(xdg_config_dir, Path(sandbox.base_dir))
 
     # Step 2: Migrate data files
     data_results = _migrate_data(xdg_data_dir, xdg_state_dir, sandbox)
@@ -301,7 +301,7 @@ def run_migration(sandbox: Any | None = None) -> bool:
     all_ok = config_ok and all(data_results.values())
 
     if all_ok:
-        _write_marker(sandbox.base_dir, _MARKER_OK)
+        _write_marker(Path(sandbox.base_dir), _MARKER_OK)
         _emit("Migration completed successfully", percent=100)
     else:
         # Report what failed
@@ -309,7 +309,7 @@ def run_migration(sandbox: Any | None = None) -> bool:
         if not config_ok:
             failed.insert(0, "config")
         _warn(f"Partial migration — failed items: {', '.join(failed)}")
-        _write_marker(sandbox.base_dir, _MARKER_PARTIAL)
+        _write_marker(Path(sandbox.base_dir), _MARKER_PARTIAL)
         _emit(f"Migration completed with {len(failed)} item(s) skipped", percent=100)
 
     return all_ok

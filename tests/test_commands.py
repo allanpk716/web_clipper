@@ -253,7 +253,10 @@ class TestCLIList:
     def test_list_empty_db(self, cli_config: Path, run_sdk_cli) -> None:
         code, envelopes = run_sdk_cli(["list"])
         results = [e for e in envelopes if e["type"] == "result"]
-        assert results == []
+        # Empty DB now emits a count:0 result line (R037)
+        assert len(results) == 1
+        assert results[0]["data"].get("count") == 0
+        assert results[0]["data"].get("_total_count") == 0
 
     def test_list_combined_filters(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
@@ -323,7 +326,9 @@ class TestCLIList:
 
         code, envelopes = run_sdk_cli(["list", "--offset", "100"])
         results = [e for e in envelopes if e["type"] == "result"]
-        assert results == []
+        # Offset beyond results now emits a count:0 result line (R037)
+        assert len(results) == 1
+        assert results[0]["data"].get("count") == 0
 
     def test_list_limit_with_tag_filter(self, cli_config: Path, run_sdk_cli) -> None:
         idx = ClipIndex(cli_config)
@@ -408,7 +413,10 @@ class TestCLISearch:
 
         code, envelopes = run_sdk_cli(["search", "nonexistent-keyword"])
         results = [e for e in envelopes if e["type"] == "result"]
-        assert results == []
+        # No matches now emit a count:0 result line (R037)
+        assert len(results) == 1
+        assert results[0]["data"].get("count") == 0
+        assert results[0]["data"].get("_total_count") == 0
 
 
 class TestCLITags:
@@ -435,7 +443,9 @@ class TestCLITags:
     def test_tags_empty_db(self, cli_config: Path, run_sdk_cli) -> None:
         code, envelopes = run_sdk_cli(["tags"])
         results = [e for e in envelopes if e["type"] == "result"]
-        assert results == []
+        # Empty DB now emits a count:0 result line (R037)
+        assert len(results) == 1
+        assert results[0]["data"].get("count") == 0
 
 
 # ── Refresh tests ───────────────────────────────────────────────────────

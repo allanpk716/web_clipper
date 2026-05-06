@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from agentsdk import App, Sandbox
+from agentsdk.health import HealthCheckResult
 
 from web_clip_helper.config import Config
 from web_clip_helper.error_codes import ErrorCode, EXIT_CODE_MAP
@@ -21,6 +22,7 @@ __all__ = [
     "get_sandbox",
     "get_writer",
     "flight_update",
+    "flight_get",
     "flight_clear",
 ]
 
@@ -89,7 +91,7 @@ def _register_providers(app: App) -> None:
 # ── Health check functions (migrated from cli.py) ─────────────────
 
 
-def _check_storage_dirs() -> dict[str, Any]:
+def _check_storage_dirs() -> HealthCheckResult:
     """Verify sandbox data/base directories are writable."""
     import time
     import uuid
@@ -106,23 +108,23 @@ def _check_storage_dirs() -> dict[str, Any]:
             probe.write_text("ok", encoding="utf-8")
             probe.unlink()
         elapsed = (time.monotonic() - start) * 1000
-        return {
-            "check": "storage_dirs",
-            "status": "pass",
-            "detail": f"All {len(dirs)} storage directories writable",
-            "duration_ms": round(elapsed, 2),
-        }
+        return HealthCheckResult(
+            name="storage_dirs",
+            status="pass",
+            message=f"All {len(dirs)} storage directories writable",
+            details={"duration_ms": round(elapsed, 2)},
+        )
     except Exception as exc:
         elapsed = (time.monotonic() - start) * 1000
-        return {
-            "check": "storage_dirs",
-            "status": "fail",
-            "detail": f"Storage directory check failed: {exc}",
-            "duration_ms": round(elapsed, 2),
-        }
+        return HealthCheckResult(
+            name="storage_dirs",
+            status="fail",
+            message=f"Storage directory check failed: {exc}",
+            details={"duration_ms": round(elapsed, 2)},
+        )
 
 
-def _check_sqlite() -> dict[str, Any]:
+def _check_sqlite() -> HealthCheckResult:
     """Verify SQLite database is accessible and schema initialized."""
     import time
 
@@ -137,23 +139,23 @@ def _check_sqlite() -> dict[str, Any]:
         conn.execute("SELECT 1").fetchone()
         idx.close()
         elapsed = (time.monotonic() - start) * 1000
-        return {
-            "check": "sqlite",
-            "status": "pass",
-            "detail": f"SQLite accessible at {config.db_path}",
-            "duration_ms": round(elapsed, 2),
-        }
+        return HealthCheckResult(
+            name="sqlite",
+            status="pass",
+            message=f"SQLite accessible at {config.db_path}",
+            details={"duration_ms": round(elapsed, 2)},
+        )
     except Exception as exc:
         elapsed = (time.monotonic() - start) * 1000
-        return {
-            "check": "sqlite",
-            "status": "fail",
-            "detail": f"SQLite check failed: {exc}",
-            "duration_ms": round(elapsed, 2),
-        }
+        return HealthCheckResult(
+            name="sqlite",
+            status="fail",
+            message=f"SQLite check failed: {exc}",
+            details={"duration_ms": round(elapsed, 2)},
+        )
 
 
-def _check_config() -> dict[str, Any]:
+def _check_config() -> HealthCheckResult:
     """Verify config loads and has required llm section."""
     import time
 
@@ -167,23 +169,23 @@ def _check_config() -> dict[str, Any]:
         if not config.llm.base_url or not config.llm.base_url.strip():
             raise ValueError("llm.base_url is empty")
         elapsed = (time.monotonic() - start) * 1000
-        return {
-            "check": "config",
-            "status": "pass",
-            "detail": f"Config valid (model={config.llm.model}, base_url={config.llm.base_url})",
-            "duration_ms": round(elapsed, 2),
-        }
+        return HealthCheckResult(
+            name="config",
+            status="pass",
+            message=f"Config valid (model={config.llm.model}, base_url={config.llm.base_url})",
+            details={"duration_ms": round(elapsed, 2)},
+        )
     except Exception as exc:
         elapsed = (time.monotonic() - start) * 1000
-        return {
-            "check": "config",
-            "status": "fail",
-            "detail": f"Config check failed: {exc}",
-            "duration_ms": round(elapsed, 2),
-        }
+        return HealthCheckResult(
+            name="config",
+            status="fail",
+            message=f"Config check failed: {exc}",
+            details={"duration_ms": round(elapsed, 2)},
+        )
 
 
-def _check_llm_connectivity() -> dict[str, Any]:
+def _check_llm_connectivity() -> HealthCheckResult:
     """Verify LLM API is reachable (skip if no api_key configured)."""
     import time
 
@@ -196,12 +198,12 @@ def _check_llm_connectivity() -> dict[str, Any]:
         config = get_config()
         if not config.llm.api_key or not config.llm.api_key.strip():
             elapsed = (time.monotonic() - start) * 1000
-            return {
-                "check": "llm_connectivity",
-                "status": "skip",
-                "detail": "No api_key configured — LLM connectivity check skipped",
-                "duration_ms": round(elapsed, 2),
-            }
+            return HealthCheckResult(
+                name="llm_connectivity",
+                status="pass",
+                message="No api_key configured — LLM connectivity check skipped",
+                details={"duration_ms": round(elapsed, 2), "skipped": True},
+            )
 
         url = f"{config.llm.base_url.rstrip('/')}/chat/completions"
         headers = {
@@ -216,20 +218,20 @@ def _check_llm_connectivity() -> dict[str, Any]:
         resp = httpx.post(url, json=payload, headers=headers, timeout=15.0)
         resp.raise_for_status()
         elapsed = (time.monotonic() - start) * 1000
-        return {
-            "check": "llm_connectivity",
-            "status": "pass",
-            "detail": f"LLM API reachable at {config.llm.base_url} (HTTP {resp.status_code})",
-            "duration_ms": round(elapsed, 2),
-        }
+        return HealthCheckResult(
+            name="llm_connectivity",
+            status="pass",
+            message=f"LLM API reachable at {config.llm.base_url} (HTTP {resp.status_code})",
+            details={"duration_ms": round(elapsed, 2)},
+        )
     except Exception as exc:
         elapsed = (time.monotonic() - start) * 1000
-        return {
-            "check": "llm_connectivity",
-            "status": "fail",
-            "detail": f"LLM connectivity check failed: {exc}",
-            "duration_ms": round(elapsed, 2),
-        }
+        return HealthCheckResult(
+            name="llm_connectivity",
+            status="fail",
+            message=f"LLM connectivity check failed: {exc}",
+            details={"duration_ms": round(elapsed, 2)},
+        )
 
 
 # ── Command metadata (replaces agent_schema.py) ───────────────────
@@ -403,6 +405,14 @@ def flight_update(**kwargs: Any) -> None:
     fc = get_app().flight_context
     for k, v in kwargs.items():
         fc.set(k, v)
+
+
+def flight_get(key: str) -> Optional[Any]:
+    """Retrieve a single value from the SDK FlightContext.
+
+    Returns ``None`` if the key does not exist.
+    """
+    return get_app().flight_context.get(key)
 
 
 def flight_clear() -> None:

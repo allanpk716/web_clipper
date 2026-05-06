@@ -54,7 +54,28 @@ class BaseAdapter(ABC):
 
 
 class AdapterError(Exception):
-    """Raised when an adapter fails to fetch or parse a URL."""
+    """Raised when an adapter fails to fetch or parse a URL.
+
+    Attributes
+    ----------
+    error_code : str | None
+        Optional semantic error classification (e.g. ``"NOT_FOUND"``,
+        ``"FETCH_ERROR"``).  When ``None``, the caller (``services/clip.py``)
+        defaults to ``"FETCH_ERROR"``.
+    url : str | None
+        The URL that caused the error, if applicable.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str | None = None,
+        url: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.url = url
 
 
 # ── URL pattern router ──────────────────────────────────────────────

@@ -36,7 +36,7 @@ from markdownify import markdownify as md
 
 from .base import AdapterError, register_adapter
 from ..models import RawContent
-from ..output import jsonl_emit_error, jsonl_emit_progress, jsonl_emit_warning
+from ..output import jsonl_emit_progress, jsonl_emit_warning
 
 __all__ = ["WeiboHeadlineAdapter"]
 
@@ -399,16 +399,15 @@ class WeiboHeadlineAdapter:
                 html = resp.text
         except httpx.TimeoutException as exc:
             msg = f"Weibo Headline fetch timeout: {exc}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg) from exc
+            raise AdapterError(msg, error_code="FETCH_ERROR", url=url) from exc
         except httpx.HTTPStatusError as exc:
-            msg = f"Weibo Headline returned HTTP {exc.response.status_code}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg) from exc
+            status = exc.response.status_code
+            msg = f"Weibo Headline returned HTTP {status}"
+            code = "NOT_FOUND" if status in (404, 410) else "FETCH_ERROR"
+            raise AdapterError(msg, error_code=code, url=url) from exc
         except httpx.RequestError as exc:
             msg = f"Weibo Headline fetch failed: {exc}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg) from exc
+            raise AdapterError(msg, error_code="FETCH_ERROR", url=url) from exc
 
         # Extract structured content
         title = _extract_title(html)
@@ -418,8 +417,7 @@ class WeiboHeadlineAdapter:
 
         if not content_html:
             msg = "Weibo Headline HTML missing content container"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg)
+            raise AdapterError(msg, error_code="PARSE_ERROR", url=url)
 
         # Convert body to Markdown
         content_md = md(content_html, strip=["script", "style"])

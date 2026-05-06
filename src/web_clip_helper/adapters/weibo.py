@@ -25,7 +25,7 @@ from markdownify import markdownify as md
 
 from .base import AdapterError, register_adapter
 from ..models import RawContent
-from ..output import jsonl_emit_error, jsonl_emit_progress, jsonl_emit_warning
+from ..output import jsonl_emit_progress, jsonl_emit_warning
 
 __all__ = ["WeiboAdapter"]
 
@@ -280,35 +280,31 @@ class WeiboAdapter:
                 data = resp.json()
         except httpx.TimeoutException as exc:
             msg = f"Weibo API timeout for mid={mid}: {exc}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg) from exc
+            raise AdapterError(msg, error_code="FETCH_ERROR", url=url) from exc
         except httpx.HTTPStatusError as exc:
-            msg = f"Weibo API returned HTTP {exc.response.status_code} for mid={mid}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg) from exc
+            status = exc.response.status_code
+            msg = f"Weibo API returned HTTP {status} for mid={mid}"
+            code = "NOT_FOUND" if status in (404, 410) else "FETCH_ERROR"
+            raise AdapterError(msg, error_code=code, url=url) from exc
         except httpx.RequestError as exc:
             msg = f"Weibo API request failed for mid={mid}: {exc}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg) from exc
+            raise AdapterError(msg, error_code="FETCH_ERROR", url=url) from exc
 
         # Validate response structure
         if not isinstance(data, dict):
             msg = f"Weibo API returned non-object response for mid={mid}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg)
+            raise AdapterError(msg, error_code="PARSE_ERROR", url=url)
 
         # Check for API-level errors
         if data.get("ok") == 0 or "data" not in data:
             error_msg = data.get("msg", "unknown error")
             msg = f"Weibo API error for mid={mid}: {error_msg}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg)
+            raise AdapterError(msg, error_code="NOT_FOUND", url=url)
 
         status = data.get("data", {})
         if not status:
             msg = f"Weibo API returned empty data for mid={mid}"
-            jsonl_emit_error(stage="fetch", detail=msg, url=url)
-            raise AdapterError(msg)
+            raise AdapterError(msg, error_code="PARSE_ERROR", url=url)
 
         # Extract content
         text_html = status.get("text", "")

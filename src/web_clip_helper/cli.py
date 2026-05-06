@@ -17,7 +17,7 @@ import click
 import typer
 from typer.core import TyperGroup
 
-from web_clip_helper.app import get_app, get_reports_dir, get_crash_dumps_dir, get_state_dir, get_data_dir, get_config_dir, flight_update, flight_clear
+from web_clip_helper.app import get_app, get_reports_dir, get_crash_dumps_dir, get_state_dir, get_data_dir, get_config_dir, flight_update, flight_get, flight_clear
 from web_clip_helper.error_codes import exit_code_for
 from web_clip_helper.output import jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning, jsonl_emit_dict
 
@@ -542,10 +542,14 @@ def clip(
     # --dry-run mode: plan-only, no real IO
     if dry_run:
         flight_update(command="clip", url=url, text=text, phase="dry-run")
-        if url:
-            plan_clip_url(url, config)
-        else:
-            plan_clip_text(text or "", config)
+        try:
+            if url:
+                plan_clip_url(url, config)
+            else:
+                plan_clip_text(text or "", config)
+        except SystemExit:
+            flight_clear()
+            raise
         flight_clear()
         return
 
@@ -572,6 +576,9 @@ def clip(
 
     executor.shutdown(wait=False)
     if result is None:
+        last_error_code = flight_get("last_error_code")
+        if last_error_code:
+            raise typer.Exit(exit_code_for(last_error_code))
         raise typer.Exit(1)
     flight_clear()
 
@@ -621,8 +628,17 @@ def list_clips(
             total_count=len(total_results),
             returned_count=len(results),
         )
-        for clip in results:
-            jsonl_emit_result(stage="list", **clip)
+        if results:
+            for clip in results:
+                jsonl_emit_result(
+                    stage="list",
+                    _total_count=len(total_results),
+                    _limit=limit,
+                    _offset=offset or 0,
+                    **clip,
+                )
+        else:
+            jsonl_emit_result(stage="list", count=0, _total_count=0, _limit=limit, _offset=offset or 0)
     except Exception as exc:
         jsonl_emit_error(stage="list", detail=f"Query failed: {exc}", error_code="INDEX_ERROR")
         raise typer.Exit(exit_code_for("INDEX_ERROR"))
@@ -682,8 +698,17 @@ def search_clips(
             results = idx.search_clips(keyword)
             mode = "metadata"
         jsonl_emit_progress(stage="search", message="Search completed", count=len(results), mode=mode)
-        for clip in results:
-            jsonl_emit_result(stage="search", **clip)
+        if results:
+            for clip in results:
+                jsonl_emit_result(
+                    stage="search",
+                    _total_count=len(results),
+                    _limit=None,
+                    _offset=0,
+                    **clip,
+                )
+        else:
+            jsonl_emit_result(stage="search", count=0, _total_count=0, _limit=None, _offset=0)
     except Exception as exc:
         jsonl_emit_error(stage="search", detail=f"Search failed: {exc}", error_code="INDEX_ERROR")
         raise typer.Exit(exit_code_for("INDEX_ERROR"))
@@ -740,8 +765,11 @@ def list_tags() -> None:
     try:
         tag_list = idx.list_tags()
         jsonl_emit_progress(stage="tags", message="Tags retrieved", count=len(tag_list))
-        for entry in tag_list:
-            jsonl_emit_result(stage="tags", **entry)
+        if tag_list:
+            for entry in tag_list:
+                jsonl_emit_result(stage="tags", **entry)
+        else:
+            jsonl_emit_result(stage="tags", count=0)
     except Exception as exc:
         jsonl_emit_error(stage="tags", detail=f"Failed to list tags: {exc}", error_code="INDEX_ERROR")
         raise typer.Exit(exit_code_for("INDEX_ERROR"))

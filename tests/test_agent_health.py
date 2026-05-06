@@ -191,8 +191,8 @@ class TestCheckLLMConnectivity:
                 from web_clip_helper.app import _check_llm_connectivity
 
                 result = _check_llm_connectivity()
-                assert result["status"] == "pass"
-                assert "api.example.com" in result["detail"]
+                assert result.status == "pass"
+                assert "api.example.com" in result.message
                 mock_post.assert_called_once()
 
     def test_llm_fails_on_error(self) -> None:
@@ -207,8 +207,8 @@ class TestCheckLLMConnectivity:
                 from web_clip_helper.app import _check_llm_connectivity
 
                 result = _check_llm_connectivity()
-                assert result["status"] == "fail"
-                assert "Connection refused" in result["detail"]
+                assert result.status == "fail"
+                assert "Connection refused" in result.message
 
     def test_llm_skips_without_api_key(self) -> None:
         with patch("web_clip_helper.config.get_config") as mock_get_config:
@@ -221,7 +221,8 @@ class TestCheckLLMConnectivity:
             from web_clip_helper.app import _check_llm_connectivity
 
             result = _check_llm_connectivity()
-            assert result["status"] == "skip"
+            assert result.status == "pass"
+            assert "skip" in result.message.lower()
 
 
 class TestCheckStorageDirs:
@@ -232,8 +233,8 @@ class TestCheckStorageDirs:
             from web_clip_helper.app import _check_storage_dirs
 
             result = _check_storage_dirs()
-            assert result["status"] == "fail"
-            assert "Permission denied" in result["detail"]
+            assert result.status == "fail"
+            assert "Permission denied" in result.message
 
 
 class TestCheckSQLite:
@@ -249,8 +250,8 @@ class TestCheckSQLite:
                 from web_clip_helper.app import _check_sqlite
 
                 result = _check_sqlite()
-                assert result["status"] == "fail"
-                assert "disk I/O error" in result["detail"]
+                assert result.status == "fail"
+                assert "disk I/O error" in result.message
 
 
 class TestCheckConfig:
@@ -264,7 +265,7 @@ class TestCheckConfig:
             from web_clip_helper.app import _check_config
 
             result = _check_config()
-            assert result["status"] == "fail"
+            assert result.status == "fail"
 
     def test_config_fails_on_empty_base_url(self) -> None:
         with patch("web_clip_helper.config.get_config") as mock_get_config:
@@ -275,8 +276,8 @@ class TestCheckConfig:
             from web_clip_helper.app import _check_config
 
             result = _check_config()
-            assert result["status"] == "fail"
-            assert "base_url" in result["detail"]
+            assert result.status == "fail"
+            assert "base_url" in result.message
 
 
 # ═══════════════════════════════════════════════════════════════════

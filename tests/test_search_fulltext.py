@@ -287,7 +287,9 @@ class TestCLISearchFull:
         results = [e for e in envelopes if e["type"] == "result"]
 
         assert len(progress) == 1
-        assert results == []
+        # S03: empty results emit count:0 result line
+        assert len(results) == 1
+        assert results[0]["data"]["count"] == 0
 
     def test_full_flag_mode_in_progress(self, cli_config: Path, tmp_path: Path, run_sdk_cli) -> None:
         """--full triggers fulltext search — verified by finding content-only matches."""
@@ -351,7 +353,9 @@ class TestCLISearchFull:
 
         code, envelopes = run_sdk_cli(["search", "--full", "quantum computing"])
         results = [e for e in envelopes if e["type"] == "result"]
-        assert results == []
+        # S03: empty results emit count:0 result line
+        assert len(results) == 1
+        assert results[0]["data"]["count"] == 0
 
     def test_full_flag_case_insensitive_content(self, cli_config: Path, tmp_path: Path, run_sdk_cli) -> None:
         """Content search via --full is case-insensitive."""
