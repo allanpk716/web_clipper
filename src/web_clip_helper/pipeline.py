@@ -11,7 +11,9 @@ SQLite index record.  All progress and results are emitted as JSONL.
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -29,6 +31,25 @@ from .output import (
 )
 from .storage import StorageManager
 from .url_utils import normalize_url
+
+logger = logging.getLogger(__name__)
+
+
+def _time_stage() -> tuple[float, time.Callable[[], float]]:
+    """Return (start_time, elapsed_ms_closure) for timing a pipeline stage.
+
+    Usage::
+
+        t0, elapsed = _time_stage()
+        ...  # do work
+        ms = elapsed()  # returns milliseconds since t0
+    """
+    t0 = time.monotonic()
+
+    def _elapsed() -> float:
+        return (time.monotonic() - t0) * 1000
+
+    return t0, _elapsed
 
 __all__ = ["clip_text", "clip_url", "plan_clip_text", "plan_clip_url"]
 
@@ -91,6 +112,10 @@ def clip_url(url: str, config: Config, *, skip_images: bool = False) -> ClipResu
         existing = None
 
     if existing is not None:
+        logger.info(
+            "clip duplicate 检测到重复 URL",
+            extra={"stage": "route", "action": "duplicate", "existing_id": existing["id"]},
+        )
         jsonl_emit_progress(
             message="Duplicate URL detected",
             percent=95,
@@ -120,11 +145,23 @@ def clip_url(url: str, config: Config, *, skip_images: bool = False) -> ClipResu
         return result
 
     # 1. Route to adapter
+    _route_t0, _route_elapsed = _time_stage()
     try:
         adapter_cls = route_url(url)
     except ValueError as exc:
+        logger.error(
+            "clip route 失败: %s",
+            exc,
+            extra={"stage": "route", "elapsed_ms": _route_elapsed(), "error": str(exc)},
+        )
         jsonl_emit_error(stage="routing", detail=str(exc), error_code="ROUTING_ERROR")
         return None
+
+    logger.info(
+        "clip route 成功: adapter=%s",
+        adapter_cls.__name__,
+        extra={"stage": "route", "adapter": adapter_cls.__name__, "elapsed_ms": _route_elapsed()},
+    )
 
     jsonl_emit_progress(
         message=f"Using adapter: {adapter_cls.__name__}",
@@ -132,15 +169,32 @@ def clip_url(url: str, config: Config, *, skip_images: bool = False) -> ClipResu
     )
 
     # 2. Fetch content
+    _fetch_t0, _fetch_elapsed = _time_stage()
     try:
         adapter = adapter_cls()
         raw: RawContent = adapter.fetch(url)
     except AdapterError as exc:
+        logger.error(
+            "clip fetch 失败: %s",
+            exc,
+            extra={"stage": "fetch", "elapsed_ms": _fetch_elapsed(), "error": str(exc)},
+        )
         jsonl_emit_error(stage="fetch", detail=str(exc), error_code="FETCH_ERROR")
         return None
     except Exception as exc:
+        logger.error(
+            "clip fetch 未预期错误: %s",
+            exc,
+            extra={"stage": "fetch", "elapsed_ms": _fetch_elapsed(), "error": str(exc)},
+        )
         jsonl_emit_error(stage="fetch", detail=f"Unexpected error: {exc}", error_code="INTERNAL_ERROR")
         return None
+
+    logger.info(
+        "clip fetch 成功: content_length=%d",
+        len(raw.content_md),
+        extra={"stage": "fetch", "content_length": len(raw.content_md), "elapsed_ms": _fetch_elapsed()},
+    )
 
     jsonl_emit_progress(
         message=f"Fetched content: {raw.title or 'untitled'}",
@@ -200,6 +254,10 @@ def _enrich_with_llm(
     """
     # Fast path: no API key → skip LLM entirely
     if not config.llm.api_key or not config.llm.api_key.strip():
+        logger.info(
+            "clip llm 跳过: no_api_key",
+            extra={"stage": "llm", "reason": "no_api_key", "elapsed_ms": 0},
+        )
         jsonl_emit_warning(
             message="LLM enrichment skipped: no API key configured",
             stage="llm",
@@ -209,12 +267,18 @@ def _enrich_with_llm(
 
     jsonl_emit_progress(message="LLM enrichment starting", percent=35)
 
+    _llm_t0, _llm_elapsed = _time_stage()
     client = LLMClient(config.llm, prompts=config.prompts)
     try:
         title = client.generate_title(raw.content_md, raw.source_type, raw.url)
         tags = client.extract_tags(raw.content_md, raw.source_type)
         category = client.classify_content(raw.content_md, raw.source_type)
     except Exception as exc:
+        logger.error(
+            "clip llm 失败: %s",
+            exc,
+            extra={"stage": "llm", "elapsed_ms": _llm_elapsed(), "error": str(exc)},
+        )
         jsonl_emit_warning(
             message=f"LLM enrichment failed: {exc}",
             stage="llm",
@@ -223,6 +287,18 @@ def _enrich_with_llm(
         tags: list[str] = []
         category = ""
         return title, tags, category
+
+    logger.info(
+        "clip llm 成功: tags_count=%d category=%s",
+        len(tags),
+        category,
+        extra={
+            "stage": "llm",
+            "tags_count": len(tags),
+            "category": category,
+            "elapsed_ms": _llm_elapsed(),
+        },
+    )
 
     jsonl_emit_progress(message="LLM enrichment complete", percent=45)
     return title, tags, category
@@ -237,11 +313,23 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
     title = llm_title
 
     # 3. Create storage entry
+    _store_t0, _store_elapsed = _time_stage()
     try:
         entry_path = storage.create_entry(title, raw.fetched_at)
     except OSError as exc:
+        logger.error(
+            "clip store 失败: %s",
+            exc,
+            extra={"stage": "store", "elapsed_ms": _store_elapsed(), "error": str(exc)},
+        )
         jsonl_emit_error(stage="storage", detail=str(exc), error_code="STORAGE_ERROR")
         return None
+
+    logger.info(
+        "clip store 成功: entry_name=%s",
+        entry_path.name,
+        extra={"stage": "store", "entry_name": entry_path.name, "elapsed_ms": _store_elapsed()},
+    )
 
     jsonl_emit_progress(
         message=f"Created storage entry: {entry_path.name}",
@@ -254,6 +342,7 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
 
     if raw.images and not skip_images:
         images_dir = storage.get_images_dir(entry_path)
+        _img_t0, _img_elapsed = _time_stage()
         try:
             url_map = download_images(
                 raw.images,
@@ -264,10 +353,21 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
                 1 for v in url_map.values() if not v.startswith("http")
             )
         except Exception as exc:
+            logger.warning(
+                "clip images 下载失败: %s",
+                exc,
+                extra={"stage": "images", "elapsed_ms": _img_elapsed(), "error": str(exc)},
+            )
             jsonl_emit_warning(
                 message=f"Image download stage failed: {exc}",
             )
             # Non-fatal — continue without images
+        else:
+            logger.info(
+                "clip images 成功: image_count=%d",
+                image_count,
+                extra={"stage": "images", "image_count": image_count, "elapsed_ms": _img_elapsed()},
+            )
 
     jsonl_emit_progress(
         message=f"Downloaded {image_count} images",
@@ -278,6 +378,7 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
     content_md = _replace_image_urls(raw.content_md, url_map)
 
     # 6. Save markdown
+    _save_t0, _save_elapsed = _time_stage()
     metadata = {
         "url": raw.url or "",
         "source_type": raw.source_type,
@@ -288,8 +389,19 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
     try:
         md_path = storage.save_markdown(entry_path, content_md, metadata)
     except OSError as exc:
+        logger.error(
+            "clip save markdown 失败: %s",
+            exc,
+            extra={"stage": "save", "elapsed_ms": _save_elapsed(), "error": str(exc)},
+        )
         jsonl_emit_error(stage="storage", detail=str(exc), error_code="STORAGE_ERROR")
         return None
+
+    logger.info(
+        "clip save markdown 成功: md_path=%s",
+        md_path.name,
+        extra={"stage": "save", "md_path": md_path.name, "elapsed_ms": _save_elapsed()},
+    )
 
     jsonl_emit_progress(
         message=f"Saved markdown: {md_path.name}",
@@ -317,6 +429,7 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
 
     # 7. Save to SQLite index
     record_id: int | None = None
+    _idx_t0, _idx_elapsed = _time_stage()
     try:
         index = ClipIndex(config.db_path)
         record_id = index.save_clip({
@@ -332,8 +445,19 @@ def _store_and_index(raw: RawContent, config: Config, *, skip_images: bool = Fal
         })
         index.close()
     except Exception as exc:
+        logger.error(
+            "clip index 失败: %s",
+            exc,
+            extra={"stage": "index", "elapsed_ms": _idx_elapsed(), "error": str(exc)},
+        )
         jsonl_emit_error(stage="index", detail=str(exc), error_code="INDEX_ERROR")
         return None
+
+    logger.info(
+        "clip index 成功: record_id=%d",
+        record_id,
+        extra={"stage": "index", "record_id": record_id, "elapsed_ms": _idx_elapsed()},
+    )
 
     jsonl_emit_progress(
         message=f"Saved to index: record #{record_id}",
