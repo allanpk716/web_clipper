@@ -18,6 +18,7 @@ from typer.core import TyperGroup
 from web_clip_helper.crash import flight_context, install_handlers
 from web_clip_helper.error_codes import exit_code_for
 from web_clip_helper.io_guard import get_captured_stdout, init_io_guard
+from web_clip_helper.logger import close_logger, init_logger
 from web_clip_helper.output import jsonl_emit, jsonl_emit_error, jsonl_emit_help, jsonl_emit_progress, jsonl_emit_result, jsonl_emit_warning, jsonl_emit_dict, jsonl_emit_schema, set_quiet, set_trace_id
 from web_clip_helper.paths import get_reports_dir
 
@@ -66,6 +67,7 @@ class _JSONLGroup(TyperGroup):
         # third-party print() calls are silently captured.  jsonl_emit() writes
         # through get_real_stdout() to reach the real terminal / CliRunner capture.
         init_io_guard()
+        init_logger()
         install_handlers()
 
         # Set trace ID: prefer AGENT_TRACE_ID env var, else generate short UUID.
@@ -94,13 +96,12 @@ class _JSONLGroup(TyperGroup):
             )
             if is_help_output:
                 self._emit_subcommand_jsonl_help(args)
-                sys.exit(0)
-
+                return
             # In non-standalone mode, a non-None return value is an exit code
             # (from click.exceptions.Exit being caught internally).  Propagate
             # it as a real exit so the CLI behaves correctly.
             if rv is not None:
-                sys.exit(rv)
+                raise SystemExit(rv)
             return rv
         except click.exceptions.ClickException as exc:
             # ClickException covers MissingParameter, NoSuchOption, BadParameter,
@@ -130,6 +131,8 @@ class _JSONLGroup(TyperGroup):
             sys.exit(exc.code if exc.code is not None else 0)
         except Exception:
             raise
+        finally:
+            close_logger()
 
     def _emit_subcommand_jsonl_help(self, args: Any) -> None:
         """Resolve the subcommand from *args* and emit JSONL help.
