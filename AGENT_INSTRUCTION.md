@@ -398,7 +398,94 @@ web-clip-helper update 42 --tags '["read"]'          # same trace_id
 
 All JSONL output from these invocations shares the same `trace_id`, enabling post-hoc log correlation.
 
-## 10. Quiet Mode
+## 10. Structured Logs
+
+Every CLI invocation writes a **structured log file** for diagnostics. This is independent of JSONL stdout output and is not affected by `--quiet` mode.
+
+### Log File Location
+
+```
+~/.web-clip-helper/logs/web-clip-helper.log
+```
+
+Read it directly with standard file tools:
+
+```bash
+cat ~/.web-clip-helper/logs/web-clip-helper.log
+# Or tail for recent entries
+tail -50 ~/.web-clip-helper/logs/web-clip-helper.log
+```
+
+### Log Format
+
+```
+YYYY-MM-DD HH:MM:SS.mmm - [LEVEL]: message key=value
+```
+
+### Correlating Logs with JSONL trace_id
+
+Every CLI invocation includes a `trace_id` in both JSONL output and log file entries. To correlate:
+
+```bash
+# Step 1: Run a command, capture the trace_id from JSONL output
+web-clip-helper clip https://example.com
+# → {"type":"result","trace_id":"abc123def4567890",...}
+
+# Step 2: Search the log file for that trace_id
+grep "abc123def4567890" ~/.web-clip-helper/logs/web-clip-helper.log
+```
+
+### Stage-by-Stage Log Fields
+
+| Stage | Key Fields | Description |
+|-------|-----------|-------------|
+| `route` | `adapter`, `elapsed_ms` | Which adapter was selected for the URL |
+| `fetch` | `content_length`, `elapsed_ms` | Content fetch result and size in bytes |
+| `llm` | `tags_count`, `category`, `reason`, `elapsed_ms` | LLM enrichment result; `reason` = `no_api_key` or `error` |
+| `images` | `image_count`, `elapsed_ms` | Number of images downloaded |
+| `store` | `entry_name`, `elapsed_ms` | Storage folder name |
+| `index` | `record_id`, `elapsed_ms` | SQLite record ID assigned |
+
+Error stages additionally include an `error` field with the error message.
+
+### Redaction Constraints
+
+Logs contain **only metadata** — never full content:
+
+| What IS logged | What is NOT logged |
+|---------------|-------------------|
+| `content_length` (integer) | Full markdown content |
+| `image_count` (integer) | Image URLs |
+| `tags_count` (integer) | Config values / API keys |
+| `elapsed_ms` (float) | User text content |
+
+**Do not** expect to find full article text, image URLs, or API keys in the log file.
+
+### Diagnostic Workflow
+
+When a clip operation fails, follow this workflow:
+
+```bash
+# 1. Run the clip and note the trace_id from JSONL output
+web-clip-helper clip https://example.com
+# → {"type":"error","trace_id":"abc123","error_code":"FETCH_ERROR",...}
+
+# 2. Search logs for that trace_id to find the failure stage
+grep "abc123" ~/.web-clip-helper/logs/web-clip-helper.log
+# → 2026-05-11 21:25:05.100 - [ERROR]: fetch failed elapsed_ms=5200 error=HTTP 404 url=https://example.com
+
+# 3. Diagnose based on the stage and error field
+# - route error → URL not matching any adapter → check URL format
+# - fetch error → network or site issue → retry or check site accessibility
+# - llm error → API key issue or LLM timeout → check config, retry
+# - images warning → individual image download failed → non-fatal, content is preserved
+```
+
+### Log Rotation
+
+The SDK manages log rotation automatically: daily rotation with 7-day retention. No manual cleanup needed.
+
+## 11. Quiet Mode
 
 Use `--quiet` / `-q` to suppress progress and warning messages. Only `result`, `error`, `help`, `schema`, `dict`, and `diagnostics` lines are emitted.
 
