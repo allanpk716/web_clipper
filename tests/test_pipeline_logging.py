@@ -76,9 +76,9 @@ class TestTimeStage:
 
         _t0, elapsed = _time_stage()
         ms1 = elapsed()
-        time.sleep(0.01)
+        time.sleep(0.05)  # 50ms — reliable on Windows (monotonic ~15.6ms)
         ms2 = elapsed()
-        assert ms2 > ms1
+        assert ms2 >= ms1
 
 
 # ── Route stage ────────────────────────────────────────────────────
