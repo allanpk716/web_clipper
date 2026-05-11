@@ -421,6 +421,62 @@ web-clip-helper config set prompts.title "请为以下{content_type}内容生成
 | `0` | 命令执行成功 |
 | `1` | 命令执行失败（查看 JSONL 中的 `error` 消息获取详情） |
 
+## 日志
+
+工具在每次运行时自动生成结构化日志文件，用于诊断和调试。
+
+### 日志文件位置
+
+```
+~/.web-clip-helper/logs/web-clip-helper.log
+```
+
+日志目录在首次运行时自动创建。
+
+### 日志格式
+
+每行日志遵循固定格式：
+
+```
+YYYY-MM-DD HH:MM:SS.mmm - [LEVEL]: message key=value
+```
+
+示例：
+
+```
+2026-05-11 21:25:03.949 - [INFO]: pipeline started cmd=clip url=https://example.com
+2026-05-11 21:25:04.102 - [INFO]: route complete elapsed_ms=12.3 adapter=GenericWebAdapter
+2026-05-11 21:25:04.587 - [INFO]: fetch complete elapsed_ms=483.1 content_length=5230
+2026-05-11 21:25:05.001 - [WARN]: LLM skipped reason=no_api_key elapsed_ms=0
+2026-05-11 21:25:05.100 - [ERROR]: fetch failed elapsed_ms=5200 error=HTTP 404
+```
+
+### 记录内容
+
+| 阶段 | 记录字段 | 说明 |
+|------|---------|------|
+| route | `adapter`, `elapsed_ms` | URL 路由到哪个适配器 |
+| fetch | `content_length`, `elapsed_ms` | 内容获取及长度 |
+| llm | `tags_count`, `category`, `reason`, `elapsed_ms` | LLM 调用结果或跳过原因 |
+| images | `image_count`, `elapsed_ms` | 图片下载数量 |
+| store | `entry_name`, `elapsed_ms` | 存储条目名称 |
+| index | `record_id`, `elapsed_ms` | 数据库索引记录 ID |
+
+### 不记录的内容（隐私保护）
+
+以下信息**不会**出现在日志中：
+
+- 完整 Markdown 正文内容
+- 图片 URL
+- 配置值（API Key 等）
+- 用户剪藏的具体文本
+
+日志仅记录元数据（长度、计数、耗时），不记录实际内容。
+
+### 日志轮转
+
+日志文件由 SDK 自动管理，按天轮转，保留最近 7 天。无需手动清理。
+
 ## 支持的 URL 类型
 
 | 适配器 | URL 格式 | 说明 |

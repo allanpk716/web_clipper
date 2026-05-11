@@ -45,6 +45,7 @@ tests/test_config.py
 tests/test_config_cli.py
 tests/test_crash.py
 tests/test_delete_command.py
+tests/test_doc_logging.py
 tests/test_dry_run.py
 tests/test_dynamic_flag.py
 tests/test_e2e_jsonl_purity.py
@@ -65,6 +66,7 @@ tests/test_migration.py
 tests/test_output.py
 tests/test_paths.py
 tests/test_pipeline.py
+tests/test_pipeline_logging.py
 tests/test_quiet_mode.py
 tests/test_refresh_preserve.py
 tests/test_report_command.py
