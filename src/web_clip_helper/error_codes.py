@@ -34,6 +34,8 @@ EXIT_CODE_MAP: dict[str, int] = {
     "STORAGE_ERROR": 3,
     "INDEX_ERROR": 3,
     "REFRESH_ERROR": 3,
+    "IMPORT_ERROR": 3,
+    "IMPORT_SCAN_ERROR": 3,
     # Exit 4 — network / third-party
     "NETWORK_ERROR": 4,
     "FETCH_ERROR": 4,
@@ -99,6 +101,10 @@ class ErrorCode:
     # ── Refresh errors ────────────────────────────────────────────
     REFRESH_ERROR = "REFRESH_ERROR"
 
+    # ── Import errors ─────────────────────────────────────────────
+    IMPORT_ERROR = "IMPORT_ERROR"
+    IMPORT_SCAN_ERROR = "IMPORT_SCAN_ERROR"
+
     # ── Timeout errors ────────────────────────────────────────────
     TIMEOUT_ERROR = "TIMEOUT_ERROR"
 
@@ -121,6 +127,8 @@ class ErrorCode:
         "REFRESH_ERROR": "Dynamic clip refresh failed",
         "TIMEOUT_ERROR": "Clip operation exceeded the configured wall-clock timeout",
         "RESOURCE_LOCKED": "Concurrent access conflict — resource is locked by another process",
+        "IMPORT_ERROR": "Failed to import clip data into the index",
+        "IMPORT_SCAN_ERROR": "Failed to scan source directory for clip folders",
     }
 
     # ── Guidance mapping (troubleshooting hints) ──────────────────
@@ -139,6 +147,8 @@ class ErrorCode:
         "REFRESH_ERROR": "Dynamic clip refresh failed. Verify the source URL is still accessible.",
         "TIMEOUT_ERROR": "The operation took too long. Increase --timeout or check network/server responsiveness.",
         "RESOURCE_LOCKED": "Another process holds a lock on the resource. Wait for it to finish or remove stale lock files.",
+        "IMPORT_ERROR": "Check disk space, file permissions, and database integrity. Verify source data is valid.",
+        "IMPORT_SCAN_ERROR": "Check that the source directory exists and is readable. Verify directory structure matches DATE_Title format.",
     }
 
     @classmethod
