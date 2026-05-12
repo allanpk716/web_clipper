@@ -254,16 +254,16 @@ web-clip-helper refresh --re-enrich
 - LLM 失败为非致命错误，失败时回退到原始标签/分类
 - JSONL 输出包含 `re_enrich` 布尔字段
 
-### feedback — 提交反馈
+### report submit — 提交反馈报告
 
 ```bash
-web-clip-helper feedback "问题描述" --type bug
+web-clip-helper report submit "问题描述" --type bug
 
 # 附加文件（如 JSONL 日志）
-web-clip-helper feedback "搜索结果不正确" --type bug --attach /path/to/log.jsonl
+web-clip-helper report submit "搜索结果不正确" --type bug --attach /path/to/log.jsonl
 ```
 
-在 `~/.web-clip-helper/feedback/` 目录下生成包含环境信息的反馈文件。附加文件会嵌入到反馈 Markdown 的代码块中。
+在 `~/.local/state/web-clip-helper/reports/` 目录下生成包含环境信息的反馈文件。附加文件会嵌入到反馈 Markdown 的代码块中。
 
 选项：
 
@@ -429,7 +429,11 @@ web-clip-helper config set prompts.title "请为以下{content_type}内容生成
 | 退出码 | 说明 |
 |--------|------|
 | `0` | 命令执行成功 |
-| `1` | 命令执行失败（查看 JSONL 中的 `error` 消息获取详情） |
+| `1` | 致命/未知错误（`INTERNAL_ERROR`、`FATAL_CRASH`） |
+| `2` | 输入/配置错误（`INPUT_INVALID`、`CONFIG_ERROR`、`INVALID_TYPE`、`NO_CUSTOM_PROMPT`） |
+| `3` | 资源/依赖错误（`NOT_FOUND`、`STORAGE_ERROR`、`INDEX_ERROR`、`REFRESH_ERROR`） |
+| `4` | 网络/第三方错误（`NETWORK_ERROR`、`FETCH_ERROR`、`ROUTING_ERROR`、`URL_ROUTE_ERROR`、`TIMEOUT_ERROR`、`IMPORT_ERROR`、`IMPORT_SCAN_ERROR`） |
+| `5` | 并发冲突（`RESOURCE_LOCKED`） |
 
 ## 日志
 
@@ -535,6 +539,12 @@ YYYY-MM-DD HH:MM:SS.mmm - [LEVEL]: message key=value
 | `INTERNAL_ERROR` | 意外内部错误（可能是 bug） |
 | `REFRESH_ERROR` | 动态剪藏刷新失败 |
 | `TIMEOUT_ERROR` | 剪藏操作超过配置的超时时间 |
+| `INVALID_TYPE` | 无效或不支持的类型参数 |
+| `NO_CUSTOM_PROMPT` | 引用了自定义 prompt 但未配置 |
+| `URL_ROUTE_ERROR` | URL 模式未匹配到适配器路由 |
+| `IMPORT_ERROR` | 导入剪藏数据到索引失败 |
+| `IMPORT_SCAN_ERROR` | 扫描源目录查找剪藏文件夹失败 |
+| `RESOURCE_LOCKED` | 并发访问冲突 — 资源被其他进程锁定 |
 
 ### Agent 集成功能
 
@@ -598,7 +608,7 @@ elif error_code == "INPUT_INVALID":
 **建议：**
 - `NETWORK_ERROR`：可重试，建议指数退避
 - `NOT_FOUND`：跳过即可，不是真正的错误
-- `INTERNAL_ERROR`：需要人工关注，可能需要提交 feedback
+- `INTERNAL_ERROR`：需要人工关注，可能需要提交 report
 - `INPUT_INVALID`：修正输入参数后重试
 - `STORAGE_ERROR` / `INDEX_ERROR`：检查磁盘空间和文件权限
 
@@ -758,15 +768,15 @@ search 命令的 progress 行包含搜索模式：
 }
 ```
 
-#### feedback result
+#### report submit result
 
 ```json
 {
   "type": "result",
-  "stage": "feedback",
-  "file": "/path/to/feedback.md",
-  "feedback_type": "bug",
-  "message": "Feedback file generated: /path/to/feedback.md"
+  "stage": "report_submit",
+  "file": "/path/to/report.md",
+  "report_type": "bug",
+  "message": "Report file generated: /path/to/report.md"
 }
 ```
 
@@ -776,7 +786,7 @@ search 命令的 progress 行包含搜索模式：
 |-----------|-------------|------|---------|
 | `routing` | `Invalid URL: ...` | URL 为空或格式无效 | 检查 URL 参数 |
 | `fetch` | `HTTP 404` / `Timeout` | 目标网站不可达 | 重试或检查 URL 是否正确 |
-| `fetch` | `AdapterError: ...` | 适配器解析失败 | 可能是页面结构变化，提交 feedback |
+| `fetch` | `AdapterError: ...` | 适配器解析失败 | 可能是页面结构变化，提交 report |
 | `storage` | `Cannot write...` | 磁盘空间不足或权限问题 | 检查 storage_path 配置 |
 | `index` | `database is locked` | SQLite 并发写入冲突 | 确保不并发调用 clip |
 | `llm` (warning) | `LLM enrichment skipped: no API key` | 未配置 API key | 运行 `config set llm.api_key <key>` |

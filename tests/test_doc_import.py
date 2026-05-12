@@ -142,3 +142,70 @@ class TestReadmeDoc:
     def test_readme_import_error_codes(self) -> None:
         content = README.read_text(encoding="utf-8")
         assert "IMPORT_ERROR" in content or "IMPORT_SCAN_ERROR" in content or "INPUT_INVALID" in content
+
+
+# ── Exit Code Accuracy ───────────────────────────────────────────────
+
+
+class TestExitCodeAccuracy:
+    """Verify documentation exit code tables match error_codes.py EXIT_CODE_MAP."""
+
+    def test_agent_doc_exit_codes_match_source(self) -> None:
+        from web_clip_helper.error_codes import EXIT_CODE_MAP
+
+        content = AGENT_DOC.read_text(encoding="utf-8")
+        for code_name, code_val in EXIT_CODE_MAP.items():
+            assert code_name in content, f"Error code {code_name} missing from AGENT_INSTRUCTION.md"
+
+    def test_readme_exit_codes_cover_0_to_5(self) -> None:
+        content = README.read_text(encoding="utf-8")
+        for code in range(6):
+            assert str(code) in content, f"Exit code {code} missing from README.md"
+
+    def test_agent_doc_exit_code_table_has_all_codes(self) -> None:
+        """AGENT_INSTRUCTION.md exit code table should list every error code from EXIT_CODE_MAP."""
+        from web_clip_helper.error_codes import EXIT_CODE_MAP
+
+        content = AGENT_DOC.read_text(encoding="utf-8")
+        for code_name in EXIT_CODE_MAP:
+            assert code_name in content, f"{code_name} not found in AGENT_INSTRUCTION.md"
+
+
+# ── Feedback → Report Submit ─────────────────────────────────────────
+
+
+class TestFeedbackToReportSubmit:
+    """Verify feedback command has been replaced with report submit in README."""
+
+    def test_readme_no_feedback_command(self) -> None:
+        content = README.read_text(encoding="utf-8")
+        assert "web-clip-helper feedback" not in content
+
+    def test_readme_has_report_submit(self) -> None:
+        content = README.read_text(encoding="utf-8")
+        assert "report submit" in content
+
+    def test_readme_report_submit_stage(self) -> None:
+        content = README.read_text(encoding="utf-8")
+        assert '"stage": "report_submit"' in content or "'stage': 'report_submit'" in content
+
+    def test_readme_no_feedback_stage(self) -> None:
+        content = README.read_text(encoding="utf-8")
+        assert '"stage": "feedback"' not in content and "'stage': 'feedback'" not in content
+
+
+# ── Error Code Completeness ──────────────────────────────────────────
+
+
+class TestErrorCodeCompleteness:
+    """Verify both docs include all critical error codes from error_codes.py."""
+
+    @pytest.mark.parametrize("code", ["IMPORT_ERROR", "IMPORT_SCAN_ERROR", "RESOURCE_LOCKED"])
+    def test_agent_doc_has_code(self, code: str) -> None:
+        content = AGENT_DOC.read_text(encoding="utf-8")
+        assert code in content, f"{code} missing from AGENT_INSTRUCTION.md"
+
+    @pytest.mark.parametrize("code", ["IMPORT_ERROR", "IMPORT_SCAN_ERROR", "RESOURCE_LOCKED"])
+    def test_readme_has_code(self, code: str) -> None:
+        content = README.read_text(encoding="utf-8")
+        assert code in content, f"{code} missing from README.md"

@@ -290,11 +290,11 @@ web-clip-helper report submit "Description of the issue" --type bug
 | Exit Code | Meaning |
 |-----------|---------|
 | 0 | Success |
-| 1 | Input/config error (`INPUT_INVALID`, `CONFIG_ERROR`) |
-| 2 | Not found (`NOT_FOUND`) |
-| 3 | Network/fetch/timeout error (`NETWORK_ERROR`, `FETCH_ERROR`, `ROUTING_ERROR`, `TIMEOUT_ERROR`) |
-| 4 | Storage/index error (`STORAGE_ERROR`, `INDEX_ERROR`, `REFRESH_ERROR`) |
-| 5 | Internal/unexpected error (`INTERNAL_ERROR`, `FATAL_CRASH`) |
+| 1 | Fatal/unknown (`INTERNAL_ERROR`, `FATAL_CRASH`) |
+| 2 | Input/config (`INPUT_INVALID`, `CONFIG_ERROR`, `INVALID_TYPE`, `NO_CUSTOM_PROMPT`) |
+| 3 | Resource/dependency (`NOT_FOUND`, `STORAGE_ERROR`, `INDEX_ERROR`, `REFRESH_ERROR`) |
+| 4 | Network/third-party (`NETWORK_ERROR`, `FETCH_ERROR`, `ROUTING_ERROR`, `URL_ROUTE_ERROR`, `TIMEOUT_ERROR`, `IMPORT_ERROR`, `IMPORT_SCAN_ERROR`) |
+| 5 | Concurrency (`RESOURCE_LOCKED`) |
 
 ### Error Codes
 
@@ -312,6 +312,12 @@ web-clip-helper report submit "Description of the issue" --type bug
 | `FATAL_CRASH` | Unrecoverable crash (signal/unhandled exception) | Check crash dump files. |
 | `REFRESH_ERROR` | Dynamic clip refresh failed | Verify the source URL is still accessible. |
 | `TIMEOUT_ERROR` | Operation exceeded wall-clock timeout | Increase `--timeout` or check network/server responsiveness. |
+| `INVALID_TYPE` | Invalid or unsupported type argument | Check `--type` value against supported types. |
+| `NO_CUSTOM_PROMPT` | Custom prompt referenced but not configured | Provide `--prompt` or configure in settings. |
+| `URL_ROUTE_ERROR` | URL pattern matched no adapter route | Ensure the URL matches a supported adapter. |
+| `IMPORT_ERROR` | Failed to import clip data into the index | Check disk space, file permissions, and database integrity. |
+| `IMPORT_SCAN_ERROR` | Failed to scan source directory for clip folders | Check that the source directory exists and is readable. |
+| `RESOURCE_LOCKED` | Concurrent access conflict — resource locked by another process | Wait for the other process to finish or remove stale lock files. |
 
 ### Error JSONL Format
 
@@ -325,8 +331,10 @@ web-clip-helper report submit "Description of the issue" --type bug
 |------------|--------|
 | `NETWORK_ERROR`, `FETCH_ERROR`, `TIMEOUT_ERROR` | **Retry** with exponential backoff (these are transient) |
 | `NOT_FOUND` | **Skip** — not a real error, the resource simply doesn't exist |
-| `INPUT_INVALID`, `CONFIG_ERROR`, `ROUTING_ERROR` | **Fix input** — check arguments, config, or URL format |
+| `INPUT_INVALID`, `CONFIG_ERROR`, `ROUTING_ERROR`, `INVALID_TYPE`, `NO_CUSTOM_PROMPT` | **Fix input** — check arguments, config, or URL format |
 | `STORAGE_ERROR`, `INDEX_ERROR` | **Check system** — disk space, file permissions, DB locks |
+| `IMPORT_ERROR`, `IMPORT_SCAN_ERROR` | **Fix input** (check source directory) or **Retry** |
+| `RESOURCE_LOCKED` | **Wait** — another process holds the lock; retry after a delay |
 | `INTERNAL_ERROR`, `FATAL_CRASH` | **Escalate** — check crash dumps, file a report |
 
 ## 7. Tool Boundaries
