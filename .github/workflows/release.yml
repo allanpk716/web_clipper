@@ -116,7 +116,7 @@ jobs:
             bash -c '
               set -e
               echo "--- Installing system deps ---"
-              apt-get update -qq && apt-get install -y -qq binutils > /dev/null 2>&1
+              apt-get update -qq && apt-get install -y -qq binutils git > /dev/null 2>&1
 
               echo "--- Installing agentsdk from GitHub ---"
               pip install --quiet "agentsdk @ git+https://github.com/allanpk716/ai-agent-cli-rules.git@main#subdirectory=sdks/python"
