@@ -858,6 +858,211 @@ def delete_clip(
         idx.close()
 
 
+@app.command(name="import")
+def import_clips(
+    source_dir: str = typer.Argument(..., help="Directory containing previously clipped data to import"),
+    copy_files: bool = typer.Option(False, "--copy", help="Copy files into storage_path instead of referencing in-place"),
+    skip_manifest: bool = typer.Option(False, "--skip-manifest", help="Skip manifest files; infer metadata from folder names and markdown content"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview what would be imported without writing to index"),
+) -> None:
+    """Import previously clipped data from an external directory into the index.
+
+    Scans the source directory for clip folders (DATE_TITLE/DATE_TITLE.md),
+    reads _manifest.json files for URL and source_type metadata, and registers
+    each entry in the SQLite index.  By default files are referenced in-place
+    (no copy).  Use --copy to copy them into the configured storage_path.
+    """
+    import json as _json
+    import re
+    from pathlib import Path as _Path
+
+    src = _Path(source_dir).resolve()
+    if not src.is_dir():
+        jsonl_emit_error(stage="import", detail=f"Source directory does not exist: {source_dir}", error_code="INPUT_INVALID")
+        raise typer.Exit(exit_code_for("INPUT_INVALID"))
+
+    # Pattern: YYYY-MM-DD_Title
+    _folder_re = re.compile(r"^(\d{4}-\d{2}-\d{2})_(.+)$")
+
+    # Collect manifests from subdirectories (dynamic/, static/, or root)
+    manifests: dict[str, dict] = {}  # folder_name -> manifest entry
+
+    def _load_manifest(manifest_path: _Path) -> None:
+        try:
+            data = _json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, _json.JSONDecodeError) as exc:
+            jsonl_emit_warning(stage="import", message=f"Skipping manifest {manifest_path}: {exc}")
+            return
+        items = data.get("items") or data.get("repos") or []
+        for entry in items:
+            folder = entry.get("folder", "")
+            if folder:
+                manifests[folder] = entry
+
+    # Look for _manifest.json in source_dir and its immediate subdirs
+    for mf_path in [src / "_manifest.json"] + [s / "_manifest.json" for s in sorted(src.iterdir()) if s.is_dir()]:
+        if mf_path.exists():
+            _load_manifest(mf_path)
+
+    # Scan for clip folders in source_dir and its subdirectories
+    clip_folders: list[tuple[_Path, dict]] = []  # (folder_path, manifest_entry)
+
+    def _scan_dir(parent: _Path) -> None:
+        if not parent.is_dir():
+            return
+        for child in sorted(parent.iterdir()):
+            if not child.is_dir():
+                continue
+            name = child.name
+            if name.startswith("_") or name == "images":
+                continue
+            if _folder_re.match(name):
+                manifest_entry = manifests.get(name, {})
+                clip_folders.append((child, manifest_entry))
+            elif name in ("dynamic", "static"):
+                _scan_dir(child)
+
+    _scan_dir(src)
+
+    if not clip_folders:
+        jsonl_emit_result(
+            stage="import",
+            imported=0,
+            skipped=0,
+            total_scanned=0,
+            message="No clip folders found in source directory",
+        )
+        return
+
+    jsonl_emit_progress(
+        stage="import",
+        message="Scanning completed",
+        total_folders=len(clip_folders),
+        with_manifest=sum(1 for _, m in clip_folders if m),
+    )
+
+    if dry_run:
+        for folder, manifest in clip_folders:
+            md_file = folder / f"{folder.name}.md"
+            jsonl_emit_result(
+                stage="import",
+                dry_run=True,
+                folder=str(folder),
+                markdown_exists=md_file.exists(),
+                manifest=bool(manifest),
+                url=manifest.get("url", ""),
+                source_type=manifest.get("source_type", "unknown"),
+            )
+        return
+
+    idx = _get_index()
+    imported = 0
+    skipped = 0
+
+    try:
+        for folder, manifest in clip_folders:
+            folder_name = folder.name
+            match = _folder_re.match(folder_name)
+            if not match:
+                skipped += 1
+                continue
+
+            date_str = match.group(1)
+            title = match.group(2)
+
+            md_file = folder / f"{folder_name}.md"
+            if not md_file.exists():
+                # Try to find any .md file in the folder
+                md_candidates = list(folder.glob("*.md"))
+                if not md_candidates:
+                    skipped += 1
+                    jsonl_emit_warning(stage="import", message=f"No markdown file in {folder_name}")
+                    continue
+                md_file = md_candidates[0]
+
+            # Determine URL and source_type from manifest or markdown content
+            url = manifest.get("url", "")
+            source_type = manifest.get("source_type", "unknown")
+
+            # Try to extract URL from markdown if not in manifest
+            if not url:
+                try:
+                    md_text = md_file.read_text(encoding="utf-8")
+                    # Look for common patterns: **链接**: https://... or source: https://...
+                    url_match = re.search(r"(?:链接|Link|URL|来源|Source)\s*[:：]\s*(https?://\S+)", md_text, re.IGNORECASE)
+                    if url_match:
+                        url = url_match.group(1).rstrip(")")
+                except OSError:
+                    pass
+
+            # Count images
+            images_dir = folder / "images"
+            image_count = len(list(images_dir.iterdir())) if images_dir.is_dir() else 0
+
+            # Determine if dynamic
+            is_dynamic = 1 if source_type in ("weibo", "weibo-headline", "weibo-card") else 0
+
+            # Resolve destination path
+            if copy_files:
+                from web_clip_helper.config import get_config
+                from web_clip_helper.storage import Storage
+
+                config = get_config()
+                storage = Storage(config.storage_path)
+                dest_entry = storage.create_entry(title)
+                storage.save_markdown(dest_entry, md_file.read_text(encoding="utf-8"))
+                # Copy images if present
+                if images_dir.is_dir():
+                    dest_images = storage.get_images_dir(dest_entry)
+                    for img in images_dir.iterdir():
+                        if img.is_file():
+                            (dest_images / img.name).write_bytes(img.read_bytes())
+                final_folder = str(dest_entry)
+                final_md = str(dest_entry / md_file.name)
+            else:
+                final_folder = str(folder)
+                final_md = str(md_file)
+
+            # Check for duplicate by folder_path
+            existing = idx.query_clips({"folder_path": final_folder})
+            if existing:
+                skipped += 1
+                jsonl_emit_warning(stage="import", message=f"Already indexed, skipping: {folder_name}")
+                continue
+
+            # Build clip record
+            clip_data = {
+                "url": url or "",
+                "title": title.replace("_", " "),
+                "source_type": source_type,
+                "category": manifest.get("category", ""),
+                "tags": manifest.get("tags", []),
+                "folder_path": final_folder,
+                "markdown_path": final_md,
+                "image_count": image_count,
+                "is_dynamic": is_dynamic,
+                "refresh_interval_days": manifest.get("refresh_interval_days", 7),
+                "created_at": f"{date_str}T00:00:00",
+                "updated_at": f"{date_str}T00:00:00",
+            }
+
+            record_id = idx.save_clip(clip_data)
+            jsonl_emit_progress(stage="import", message=f"Imported: {folder_name}", record_id=record_id)
+            imported += 1
+
+        jsonl_emit_result(
+            stage="import",
+            imported=imported,
+            skipped=skipped,
+            total_scanned=len(clip_folders),
+        )
+    except Exception as exc:
+        jsonl_emit_error(stage="import", detail=f"Import failed: {exc}", error_code="INDEX_ERROR")
+        raise typer.Exit(exit_code_for("INDEX_ERROR"))
+    finally:
+        idx.close()
+
+
 @app.command(name="tags")
 def list_tags() -> None:
     """List all unique tags with usage counts. Output is JSONL."""

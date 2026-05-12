@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "web-clip-helper"
-version = "0.3.0"
+version = "0.3.1"
 description = "LLM Agent-oriented web clipping CLI tool"
 readme = "README.md"
 requires-python = ">=3.10"
