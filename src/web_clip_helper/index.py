@@ -273,6 +273,20 @@ class ClipIndex:
             return None
         return self._row_to_dict(row)
 
+    def find_by_folder_path(self, folder_path: str) -> dict[str, Any] | None:
+        """Look up a clip by its folder_path.
+
+        Returns the most recent matching clip, or ``None``.
+        """
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM clips WHERE folder_path = ? ORDER BY id DESC LIMIT 1",
+            (folder_path,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
     def search_clips(self, keyword: str) -> list[dict[str, Any]]:
         """Search clips by keyword in title and url (case-insensitive LIKE)."""
         conn = self._connect()

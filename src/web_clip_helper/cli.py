@@ -989,7 +989,7 @@ def import_clips(
                 try:
                     md_text = md_file.read_text(encoding="utf-8")
                     # Look for common patterns: **链接**: https://... or source: https://...
-                    url_match = re.search(r"(?:链接|Link|URL|来源|Source)\s*[:：]\s*(https?://\S+)", md_text, re.IGNORECASE)
+                    url_match = re.search(r"(?:链接|Link|URL|来源|Source)\s*\**\s*[:：]\s*(https?://\S+)", md_text, re.IGNORECASE)
                     if url_match:
                         url = url_match.group(1).rstrip(")")
                 except OSError:
@@ -1005,10 +1005,10 @@ def import_clips(
             # Resolve destination path
             if copy_files:
                 from web_clip_helper.config import get_config
-                from web_clip_helper.storage import Storage
+                from web_clip_helper.storage import StorageManager
 
                 config = get_config()
-                storage = Storage(config.storage_path)
+                storage = StorageManager(config.storage_path)
                 dest_entry = storage.create_entry(title)
                 storage.save_markdown(dest_entry, md_file.read_text(encoding="utf-8"))
                 # Copy images if present
@@ -1024,8 +1024,7 @@ def import_clips(
                 final_md = str(md_file)
 
             # Check for duplicate by folder_path
-            existing = idx.query_clips({"folder_path": final_folder})
-            if existing:
+            if idx.find_by_folder_path(final_folder):
                 skipped += 1
                 jsonl_emit_warning(stage="import", message=f"Already indexed, skipping: {folder_name}")
                 continue
