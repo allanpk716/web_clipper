@@ -74,6 +74,7 @@ def build():
         "--hidden-import", "web_clip_helper.adapter",
         "--hidden-import", "web_clip_helper.services",
         "--hidden-import", "web_clip_helper.services.import_service",
+        "--hidden-import", "web_clip_helper.services.backup_service",
         "--hidden-import", "typer",
         "--hidden-import", "click",
         "--hidden-import", "httpx",
