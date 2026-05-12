@@ -34,8 +34,9 @@ EXIT_CODE_MAP: dict[str, int] = {
     "STORAGE_ERROR": 3,
     "INDEX_ERROR": 3,
     "REFRESH_ERROR": 3,
-    "IMPORT_ERROR": 3,
-    "IMPORT_SCAN_ERROR": 3,
+    # Exit 4 — network / third-party (import involves external data sources)
+    "IMPORT_ERROR": 4,
+    "IMPORT_SCAN_ERROR": 4,
     # Exit 4 — network / third-party
     "NETWORK_ERROR": 4,
     "FETCH_ERROR": 4,
