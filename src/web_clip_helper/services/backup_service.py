@@ -6,6 +6,9 @@ Collects files from two XDG directories:
 
 Produces a single zip file with forward-slash entry paths, atomic write
 via ``.tmp`` + ``os.replace()``, and collision-safe filename generation.
+
+Also provides helpers for listing backups, rotating old backups via
+grandfather-father-son policy, and reading/writing backup configuration.
 """
 
 from __future__ import annotations
@@ -17,14 +20,29 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+import agentsdk.backup
+
 from .. import paths
 
 __all__ = [
     "BACKUP_PREFIX",
+    "cleanup_backups",
     "create_backup",
     "get_backup_config_path",
     "get_default_output_dir",
+    "list_backups",
+    "set_backup_config",
+    "show_backup_config",
 ]
+
+_ALLOWED_CONFIG_KEYS = frozenset(
+    [
+        "retention_policy.daily",
+        "retention_policy.weekly",
+        "retention_policy.monthly",
+        "output_dir",
+    ]
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +112,212 @@ def create_backup(
         "output_dir": str(output_dir),
         "filename": zip_path.name,
     }
+
+
+def list_backups(output_dir: str | None = None) -> list[dict]:
+    """List existing backups in *output_dir*.
+
+    Parameters
+    ----------
+    output_dir:
+        Directory to scan.  Defaults to :func:`get_default_output_dir`.
+
+    Returns
+    -------
+    list[dict]
+        Each dict has ``filename``, ``size_bytes``, and ``created_at``
+        (ISO-8601 string or ``None``).  Returns an empty list when no
+        backups are found.
+    """
+    if output_dir is None:
+        output_dir = str(get_default_output_dir())
+
+    logger.info("backup_list_start output_dir=%r", output_dir)
+    metas = agentsdk.backup.ListBackups(str(output_dir), BACKUP_PREFIX)
+
+    result = []
+    for m in metas:
+        created_at = m.created_at.isoformat() if m.created_at is not None else None
+        result.append(
+            {
+                "filename": m.filename,
+                "size_bytes": m.size,
+                "created_at": created_at,
+            }
+        )
+
+    logger.info("backup_list_complete count=%d", len(result))
+    return result
+
+
+def cleanup_backups(
+    output_dir: str | None = None,
+    config_path: str | None = None,
+) -> dict:
+    """Rotate backups according to the retention policy.
+
+    Parameters
+    ----------
+    output_dir:
+        Directory containing backups.  Defaults to
+        :func:`get_default_output_dir`.
+    config_path:
+        Path to the backup config JSON file.  Defaults to
+        :func:`get_backup_config_path`.
+
+    Returns
+    -------
+    dict
+        ``kept`` (list of filenames), ``removed`` (list of filenames),
+        ``total_before`` (int).
+    """
+    if output_dir is None:
+        output_dir = str(get_default_output_dir())
+    if config_path is None:
+        config_path = str(get_backup_config_path())
+
+    logger.info("backup_cleanup_start output_dir=%r config_path=%r", output_dir, config_path)
+
+    config = agentsdk.backup.LoadBackupConfig(config_path)
+    backups = agentsdk.backup.ListBackups(output_dir, BACKUP_PREFIX)
+    total_before = len(backups)
+
+    # Nothing to rotate if no backups found or dir doesn't exist
+    if total_before == 0:
+        logger.info("backup_cleanup_complete kept=0 removed=0 total_before=0")
+        return {"kept": [], "removed": [], "total_before": 0}
+
+    rotation = agentsdk.backup.GFSRotate(
+        backups, config.retention_policy, output_dir,
+    )
+
+    logger.info(
+        "backup_cleanup_complete kept=%d removed=%d total_before=%d",
+        len(rotation.kept),
+        len(rotation.removed),
+        total_before,
+    )
+
+    return {
+        "kept": list(rotation.kept),
+        "removed": list(rotation.removed),
+        "total_before": total_before,
+    }
+
+
+def show_backup_config(config_path: str | None = None) -> dict:
+    """Load and return the effective backup configuration.
+
+    Parameters
+    ----------
+    config_path:
+        Path to the backup config JSON file.  Defaults to
+        :func:`get_backup_config_path`.
+
+    Returns
+    -------
+    dict
+        ``retention_policy`` (dict with ``daily``, ``weekly``, ``monthly``),
+        ``output_dir``, and ``source`` (``"file"`` if the config file
+        existed on disk, ``"defaults"`` otherwise).
+    """
+    if config_path is None:
+        config_path = str(get_backup_config_path())
+
+    logger.info("backup_config_show_start config_path=%r", config_path)
+
+    config = agentsdk.backup.LoadBackupConfig(config_path)
+    # Determine source: if the file exists, it came from disk
+    source = "file" if Path(config_path).is_file() else "defaults"
+
+    result = {
+        "retention_policy": {
+            "daily": config.retention_policy.daily,
+            "weekly": config.retention_policy.weekly,
+            "monthly": config.retention_policy.monthly,
+        },
+        "output_dir": config.output_dir,
+        "source": source,
+    }
+
+    logger.info("backup_config_show_complete source=%r", source)
+    return result
+
+
+def set_backup_config(
+    key: str,
+    value: str,
+    config_path: str | None = None,
+) -> dict:
+    """Update a single config key and persist to disk.
+
+    Parameters
+    ----------
+    key:
+        Dot-path key to set.  One of ``retention_policy.daily``,
+        ``retention_policy.weekly``, ``retention_policy.monthly``, or
+        ``output_dir``.
+    value:
+        New value as a string.  Retention values are coerced to
+        ``int``; ``output_dir`` is kept as-is.
+    config_path:
+        Path to the backup config JSON file.  Defaults to
+        :func:`get_backup_config_path`.
+
+    Returns
+    -------
+    dict
+        The full updated config dict (same shape as :func:`show_backup_config`)
+        with ``source`` set to ``"file"``.
+
+    Raises
+    ------
+    ValueError
+        If *key* is not in the allowed set, or if a retention value
+        is not a positive integer, or if *output_dir* is empty.
+    """
+    if key not in _ALLOWED_CONFIG_KEYS:
+        raise ValueError(
+            f"Unknown config key {key!r}. Allowed: {sorted(_ALLOWED_CONFIG_KEYS)}"
+        )
+
+    if config_path is None:
+        config_path = str(get_backup_config_path())
+
+    logger.info("backup_config_set_start key=%r value=%r config_path=%r", key, value, config_path)
+
+    config = agentsdk.backup.LoadBackupConfig(config_path)
+
+    # Apply the update
+    if key == "output_dir":
+        if not value:
+            raise ValueError("output_dir must be a non-empty string")
+        config.output_dir = value
+    else:
+        # key is retention_policy.daily / weekly / monthly
+        attr = key.split(".")[-1]  # "daily", "weekly", or "monthly"
+        try:
+            int_val = int(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} must be a positive integer, got {value!r}")
+        if int_val < 1:
+            raise ValueError(f"{key} must be a positive integer, got {int_val}")
+        setattr(config.retention_policy, attr, int_val)
+
+    agentsdk.backup.SaveBackupConfig(config_path, config)
+
+    result = {
+        "retention_policy": {
+            "daily": config.retention_policy.daily,
+            "weekly": config.retention_policy.weekly,
+            "monthly": config.retention_policy.monthly,
+        },
+        "output_dir": config.output_dir,
+        "source": "file",
+    }
+
+    logger.info("backup_config_set_complete key=%r", key)
+    return result
 
 
 # ── Internal implementation ────────────────────────────────────────

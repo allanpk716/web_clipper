@@ -1,21 +1,27 @@
-"""Tests for backup_service.create_backup and helpers."""
+"""Tests for backup_service — create, list, cleanup, config show/config set."""
 
 from __future__ import annotations
 
+import json
 import os
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+import agentsdk.backup
 import pytest
 
 from web_clip_helper.services.backup_service import (
     BACKUP_PREFIX,
     _create_backup,
     _generate_filename,
+    cleanup_backups,
     create_backup,
     get_backup_config_path,
     get_default_output_dir,
+    list_backups,
+    set_backup_config,
+    show_backup_config,
 )
 
 
@@ -481,3 +487,292 @@ class TestBoundaryConditions:
         with zipfile.ZipFile(result["path"]) as zf:
             names = zf.namelist()
             assert len(names) == 0
+
+
+# ── list_backups ──────────────────────────────────────────────────
+
+
+class TestListBackups:
+    def test_empty_dir_returns_empty_list(self, tmp_path: Path):
+        result = list_backups(output_dir=str(tmp_path))
+        assert result == []
+
+    def test_nonexistent_dir_returns_empty_list(self, tmp_path: Path):
+        result = list_backups(output_dir=str(tmp_path / "nope"))
+        assert result == []
+
+    def test_lists_backups(self, tmp_path: Path):
+        """Create real backups and verify list_backups finds them."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("k: v\n")
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "clips.db").write_bytes(b"db")
+        output_dir = tmp_path / "output"
+
+        create_backup(config_dir=config_dir, data_dir=data_dir, output_dir=output_dir)
+
+        result = list_backups(output_dir=str(output_dir))
+        assert len(result) == 1
+        entry = result[0]
+        assert "filename" in entry
+        assert "size_bytes" in entry
+        assert "created_at" in entry
+        assert entry["size_bytes"] > 0
+
+    def test_returns_multiple_backups(self, tmp_path: Path):
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("k: v\n")
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "clips.db").write_bytes(b"db")
+        output_dir = tmp_path / "output"
+
+        create_backup(config_dir=config_dir, data_dir=data_dir, output_dir=output_dir)
+        create_backup(config_dir=config_dir, data_dir=data_dir, output_dir=output_dir)
+
+        result = list_backups(output_dir=str(output_dir))
+        assert len(result) == 2
+
+    def test_default_output_dir(self):
+        """When output_dir is None, uses get_default_output_dir."""
+        with patch(
+            "web_clip_helper.services.backup_service.get_default_output_dir",
+            return_value=Path("/fake/backups"),
+        ):
+            with patch("agentsdk.backup.ListBackups", return_value=[]):
+                list_backups(output_dir=None)
+
+    def test_created_at_is_iso_string(self, tmp_path: Path):
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("k: v\n")
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "clips.db").write_bytes(b"db")
+        output_dir = tmp_path / "output"
+
+        create_backup(config_dir=config_dir, data_dir=data_dir, output_dir=output_dir)
+
+        result = list_backups(output_dir=str(output_dir))
+        assert len(result) == 1
+        # created_at should be a string (ISO format) or None
+        assert isinstance(result[0]["created_at"], (str, type(None)))
+
+
+# ── show_backup_config ────────────────────────────────────────────
+
+
+class TestShowBackupConfig:
+    def test_defaults_when_no_config_file(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        result = show_backup_config(config_path=str(config_path))
+        assert result["source"] == "defaults"
+        assert result["retention_policy"]["daily"] == 7
+        assert result["retention_policy"]["weekly"] == 4
+        assert result["retention_policy"]["monthly"] == 6
+        assert "output_dir" in result
+
+    def test_reads_existing_config(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "retention_policy": {"daily": 3, "weekly": 2, "monthly": 1},
+                    "output_dir": "/custom/backups",
+                }
+            )
+        )
+        result = show_backup_config(config_path=str(config_path))
+        assert result["source"] == "file"
+        assert result["retention_policy"]["daily"] == 3
+        assert result["retention_policy"]["weekly"] == 2
+        assert result["retention_policy"]["monthly"] == 1
+        assert result["output_dir"] == "/custom/backups"
+
+    def test_default_config_path_used_when_none(self):
+        with patch(
+            "web_clip_helper.services.backup_service.get_backup_config_path",
+            return_value=Path("/fake/backup-config.json"),
+        ):
+            with patch("agentsdk.backup.LoadBackupConfig") as mock_load:
+                show_backup_config(config_path=None)
+                mock_load.assert_called_once()
+                # Verify the path string was passed (platform-normalized)
+                call_arg = mock_load.call_args[0][0]
+                assert "backup-config.json" in call_arg
+
+
+# ── set_backup_config ─────────────────────────────────────────────
+
+
+class TestSetBackupConfig:
+    def test_set_daily(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        result = set_backup_config("retention_policy.daily", "5", config_path=str(config_path))
+        assert result["retention_policy"]["daily"] == 5
+        assert result["source"] == "file"
+
+        # Verify persisted
+        loaded = json.loads(config_path.read_text())
+        assert loaded["retention_policy"]["daily"] == 5
+
+    def test_set_weekly(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        result = set_backup_config("retention_policy.weekly", "10", config_path=str(config_path))
+        assert result["retention_policy"]["weekly"] == 10
+
+    def test_set_monthly(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        result = set_backup_config("retention_policy.monthly", "12", config_path=str(config_path))
+        assert result["retention_policy"]["monthly"] == 12
+
+    def test_set_output_dir(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        result = set_backup_config("output_dir", "/new/path", config_path=str(config_path))
+        assert result["output_dir"] == "/new/path"
+
+    def test_update_preserves_other_values(self, tmp_path: Path):
+        """Setting daily should not change weekly/monthly."""
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "retention_policy": {"daily": 7, "weekly": 4, "monthly": 6},
+                    "output_dir": "",
+                }
+            )
+        )
+        set_backup_config("retention_policy.daily", "3", config_path=str(config_path))
+        result = show_backup_config(config_path=str(config_path))
+        assert result["retention_policy"]["daily"] == 3
+        assert result["retention_policy"]["weekly"] == 4
+        assert result["retention_policy"]["monthly"] == 6
+
+    def test_unknown_key_raises(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        with pytest.raises(ValueError, match="Unknown config key"):
+            set_backup_config("bogus_key", "1", config_path=str(config_path))
+
+    def test_retention_zero_raises(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        with pytest.raises(ValueError, match="positive integer"):
+            set_backup_config("retention_policy.daily", "0", config_path=str(config_path))
+
+    def test_retention_negative_raises(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        with pytest.raises(ValueError, match="positive integer"):
+            set_backup_config("retention_policy.weekly", "-1", config_path=str(config_path))
+
+    def test_retention_non_integer_raises(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        with pytest.raises(ValueError, match="positive integer"):
+            set_backup_config("retention_policy.monthly", "abc", config_path=str(config_path))
+
+    def test_output_dir_empty_raises(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        with pytest.raises(ValueError, match="non-empty string"):
+            set_backup_config("output_dir", "", config_path=str(config_path))
+
+    def test_string_coercion_for_int(self, tmp_path: Path):
+        """Value comes as string from CLI — ensure int coercion works."""
+        config_path = tmp_path / "config.json"
+        result = set_backup_config("retention_policy.daily", " 14 ", config_path=str(config_path))
+        assert result["retention_policy"]["daily"] == 14
+
+    def test_default_config_path_used_when_none(self):
+        with patch(
+            "web_clip_helper.services.backup_service.get_backup_config_path",
+            return_value=Path("/fake/backup-config.json"),
+        ):
+            with patch("agentsdk.backup.LoadBackupConfig") as mock_load, \
+                 patch("agentsdk.backup.SaveBackupConfig") as mock_save:
+                set_backup_config("retention_policy.daily", "5", config_path=None)
+                mock_load.assert_called_once()
+                mock_save.assert_called_once()
+
+
+# ── cleanup_backups ───────────────────────────────────────────────
+
+
+class TestCleanupBackups:
+    def test_empty_dir(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        result = cleanup_backups(
+            output_dir=str(tmp_path / "no_backups"),
+            config_path=str(config_path),
+        )
+        assert result["kept"] == []
+        assert result["removed"] == []
+        assert result["total_before"] == 0
+
+    def test_cleanup_removes_old(self, tmp_path: Path):
+        """Verify cleanup calls GFSRotate and returns correct structure."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("k: v\n")
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "clips.db").write_bytes(b"db")
+        output_dir = tmp_path / "output"
+
+        for _ in range(5):
+            create_backup(config_dir=config_dir, data_dir=data_dir, output_dir=output_dir)
+
+        config_path = tmp_path / "config.json"
+        set_backup_config("retention_policy.daily", "1", config_path=str(config_path))
+
+        # Mock GFSRotate to simulate rotation that keeps 1, removes 4
+        fake_rotation = agentsdk.backup.RotationResult(
+            kept=["newest.zip"], removed=["old1.zip", "old2.zip", "old3.zip", "old4.zip"],
+        )
+        with patch("agentsdk.backup.GFSRotate", return_value=fake_rotation):
+            result = cleanup_backups(
+                output_dir=str(output_dir),
+                config_path=str(config_path),
+            )
+
+        assert result["total_before"] == 5
+        assert len(result["kept"]) == 1
+        assert len(result["removed"]) == 4
+
+    def test_cleanup_keeps_files_on_disk(self, tmp_path: Path):
+        """After cleanup, 'kept' files should exist and 'removed' files should not."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("k: v\n")
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "clips.db").write_bytes(b"db")
+        output_dir = tmp_path / "output"
+
+        for _ in range(3):
+            create_backup(config_dir=config_dir, data_dir=data_dir, output_dir=output_dir)
+
+        config_path = tmp_path / "config.json"
+        set_backup_config("retention_policy.daily", "1", config_path=str(config_path))
+
+        result = cleanup_backups(
+            output_dir=str(output_dir),
+            config_path=str(config_path),
+        )
+
+        for fname in result["kept"]:
+            assert (output_dir / fname).exists(), f"kept file {fname} missing"
+        for fname in result["removed"]:
+            assert not (output_dir / fname).exists(), f"removed file {fname} still on disk"
+
+    def test_default_paths_used_when_none(self):
+        with patch(
+            "web_clip_helper.services.backup_service.get_default_output_dir",
+            return_value=Path("/fake/output"),
+        ), patch(
+            "web_clip_helper.services.backup_service.get_backup_config_path",
+            return_value=Path("/fake/config.json"),
+        ), patch("agentsdk.backup.LoadBackupConfig"), \
+           patch("agentsdk.backup.ListBackups", return_value=[]):
+            # With empty list, cleanup returns early without calling GFSRotate
+            result = cleanup_backups(output_dir=None, config_path=None)
+            assert result["total_before"] == 0
