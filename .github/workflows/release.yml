@@ -141,25 +141,28 @@ jobs:
               python build.py --skip-install
 
               echo "--- Build complete ---"
-              ls -lh dist/web-clip-helper
-              chmod +x dist/web-clip-helper
+              mv dist/web-clip-helper dist/web-clip-helper-linux-x86
+              chmod +x dist/web-clip-helper-linux-x86
+              ls -lh dist/web-clip-helper-linux-x86
             '
+
+      - name: Fix ownership for artifact upload
+        run: sudo chown -R $(id -u):$(id -g) dist/
 
       - name: Prepare release binary
         id: binary
         shell: bash
         run: |
           ASSET_NAME="web-clip-helper-linux-x86"
-          mv dist/web-clip-helper "${ASSET_NAME}"
-          chmod +x "${ASSET_NAME}"
+          chmod +x "dist/${ASSET_NAME}"
           echo "asset_name=${ASSET_NAME}" >> "$GITHUB_OUTPUT"
-          ls -lh "${ASSET_NAME}"
+          ls -lh "dist/${ASSET_NAME}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.binary.outputs.asset_name }}
-          path: ${{ steps.binary.outputs.asset_name }}
+          path: dist/${{ steps.binary.outputs.asset_name }}
           if-no-files-found: error
 
   release:
