@@ -254,6 +254,69 @@ web-clip-helper refresh --re-enrich
 - LLM 失败为非致命错误，失败时回退到原始标签/分类
 - JSONL 输出包含 `re_enrich` 布尔字段
 
+### backup — 备份管理
+
+```bash
+# 创建备份（打包 config.yaml、clips.db、clips/ 目录）
+web-clip-helper backup create
+
+# 指定备份输出目录
+web-clip-helper backup create --output-dir /path/to/backups
+
+# 列出已有备份
+web-clip-helper backup list
+
+# 按保留策略清理旧备份（祖父-父-子轮转策略）
+web-clip-helper backup cleanup
+
+# 查看当前备份配置
+web-clip-helper backup config show
+
+# 修改保留策略（例如每日保留 14 份）
+web-clip-helper backup config set retention_policy.daily 14
+
+# 修改备份输出目录
+web-clip-helper backup config set output_dir /path/to/backups
+```
+
+子命令：
+
+| 子命令 | 说明 |
+|--------|------|
+| `backup create` | 创建备份 zip 归档（包含配置和数据目录） |
+| `backup list` | 列出已有备份文件及大小、创建时间 |
+| `backup cleanup` | 按保留策略轮转清理旧备份 |
+| `backup config show` | 显示当前备份配置（保留策略、输出目录、配置来源） |
+| `backup config set <key> <value>` | 设置备份配置项并持久化 |
+
+选项：
+
+| 选项 | 说明 |
+|------|------|
+| `--output-dir` | 覆盖默认备份输出目录 |
+| `--config-path` | 覆盖默认备份配置文件路径 |
+
+**可配置项（`backup config set`）：**
+
+| 键 | 说明 | 默认值 |
+|----|------|--------|
+| `retention_policy.daily` | 每日备份保留数量 | `7` |
+| `retention_policy.weekly` | 每周备份保留数量 | `4` |
+| `retention_policy.monthly` | 每月备份保留数量 | `6` |
+| `output_dir` | 备份文件输出目录 | XDG 状态目录下的 `backups/` |
+
+**恢复方法：** 将备份 zip 文件解压到原始数据/配置目录。恢复后运行 `web-clip-helper agent doctor` 验证完整性。
+
+JSONL 输出示例：
+
+```jsonl
+{"type":"result","stage":"backup_create","path":"/path/to/backups/wch-backup-2026-05-12.zip","size_bytes":1048576,"output_dir":"/path/to/backups","filename":"wch-backup-2026-05-12.zip"}
+{"type":"result","stage":"backup_list","filename":"wch-backup-2026-05-12.zip","size_bytes":1048576,"created_at":"2026-05-12T03:00:00"}
+{"type":"result","stage":"backup_cleanup","kept":["wch-backup-2026-05-12.zip"],"removed":["wch-backup-2026-04-28.zip"],"total_before":2}
+```
+
+错误码：`BACKUP_ERROR`（备份操作失败）、`BACKUP_NOT_FOUND`（无数据可备份）
+
 ### report submit — 提交反馈报告
 
 ```bash
@@ -431,7 +494,7 @@ web-clip-helper config set prompts.title "请为以下{content_type}内容生成
 | `0` | 命令执行成功 |
 | `1` | 致命/未知错误（`INTERNAL_ERROR`、`FATAL_CRASH`） |
 | `2` | 输入/配置错误（`INPUT_INVALID`、`CONFIG_ERROR`、`INVALID_TYPE`、`NO_CUSTOM_PROMPT`） |
-| `3` | 资源/依赖错误（`NOT_FOUND`、`STORAGE_ERROR`、`INDEX_ERROR`、`REFRESH_ERROR`） |
+| `3` | 资源/依赖错误（`NOT_FOUND`、`STORAGE_ERROR`、`INDEX_ERROR`、`REFRESH_ERROR`、`BACKUP_ERROR`、`BACKUP_NOT_FOUND`） |
 | `4` | 网络/第三方错误（`NETWORK_ERROR`、`FETCH_ERROR`、`ROUTING_ERROR`、`URL_ROUTE_ERROR`、`TIMEOUT_ERROR`、`IMPORT_ERROR`、`IMPORT_SCAN_ERROR`） |
 | `5` | 并发冲突（`RESOURCE_LOCKED`） |
 
@@ -545,6 +608,8 @@ YYYY-MM-DD HH:MM:SS.mmm - [LEVEL]: message key=value
 | `IMPORT_ERROR` | 导入剪藏数据到索引失败 |
 | `IMPORT_SCAN_ERROR` | 扫描源目录查找剪藏文件夹失败 |
 | `RESOURCE_LOCKED` | 并发访问冲突 — 资源被其他进程锁定 |
+| `BACKUP_ERROR` | 备份操作失败（检查磁盘空间、文件权限） |
+| `BACKUP_NOT_FOUND` | 无数据可备份（数据目录为空或不存在） |
 
 ### Agent 集成功能
 
@@ -765,6 +830,64 @@ search 命令的 progress 行包含搜索模式：
   "type": "result",
   "stage": "version",
   "version": "0.1.0"
+}
+```
+
+#### backup create result
+
+```json
+{
+  "type": "result",
+  "stage": "backup_create",
+  "path": "/path/to/backups/wch-backup-2026-05-12.zip",
+  "size_bytes": 1048576,
+  "output_dir": "/path/to/backups",
+  "filename": "wch-backup-2026-05-12.zip"
+}
+```
+
+#### backup list result
+
+每行一个备份条目，最后汇总行：
+
+```json
+{"type": "result", "stage": "backup_list", "filename": "wch-backup-2026-05-12.zip", "size_bytes": 1048576, "created_at": "2026-05-12T03:00:00"}
+{"type": "result", "stage": "backup_list", "count": 3}
+```
+
+#### backup cleanup result
+
+```json
+{
+  "type": "result",
+  "stage": "backup_cleanup",
+  "kept": ["wch-backup-2026-05-12.zip", "wch-backup-2026-05-05.zip"],
+  "removed": ["wch-backup-2026-04-28.zip"],
+  "total_before": 3
+}
+```
+
+#### backup config show result
+
+```json
+{
+  "type": "result",
+  "stage": "backup_config_show",
+  "retention_policy": {"daily": 7, "weekly": 4, "monthly": 6},
+  "output_dir": "/path/to/backups",
+  "source": "defaults"
+}
+```
+
+#### backup config set result
+
+```json
+{
+  "type": "result",
+  "stage": "backup_config_set",
+  "retention_policy": {"daily": 14, "weekly": 4, "monthly": 6},
+  "output_dir": "/path/to/backups",
+  "source": "file"
 }
 ```
 

@@ -128,6 +128,42 @@ Every JSONL line includes these envelope fields:
 | `report list` | List submitted reports |
 | `report show <id>` | Show a specific report |
 
+### Backup Commands
+
+| Command | Description | Idempotent |
+|---------|-------------|------------|
+| `backup create` | Create a backup zip archive of config and data directories | No (creates new zip each time) |
+| `backup list` | List existing backup files with size and creation date | Yes |
+| `backup cleanup` | Rotate backups according to retention policy (Grandfather-Father-Son) | Yes |
+| `backup config show` | Show effective backup configuration (retention policy, output directory, source) | Yes |
+| `backup config set <key> <value>` | Set a backup configuration value and persist to disk | Yes |
+
+**Parameters:**
+
+| Command | Parameter | Type | Required | Description |
+|---------|-----------|------|----------|-------------|
+| `backup create` | `--output-dir` | string | No | Override default backup output directory |
+| `backup list` | `--output-dir` | string | No | Override default backup output directory |
+| `backup cleanup` | `--output-dir` | string | No | Override default backup output directory |
+| `backup cleanup` | `--config-path` | string | No | Override default backup config file path |
+| `backup config show` | `--config-path` | string | No | Override default backup config file path |
+| `backup config set` | `key` | string | Yes | Config key: `retention_policy.daily`, `retention_policy.weekly`, `retention_policy.monthly`, or `output_dir` |
+| `backup config set` | `value` | string | Yes | New value (integers for retention, path string for `output_dir`) |
+| `backup config set` | `--config-path` | string | No | Override default backup config file path |
+
+**Backup JSONL output examples:**
+
+```jsonl
+{"type":"result","stage":"backup_create","path":"/path/to/backups/wch-backup-2026-05-12.zip","size_bytes":1048576,"output_dir":"/path/to/backups","filename":"wch-backup-2026-05-12.zip"}
+{"type":"result","stage":"backup_list","filename":"wch-backup-2026-05-12.zip","size_bytes":1048576,"created_at":"2026-05-12T03:00:00"}
+{"type":"result","stage":"backup_list","count":3}
+{"type":"result","stage":"backup_cleanup","kept":["wch-backup-2026-05-12.zip","wch-backup-2026-05-05.zip"],"removed":["wch-backup-2026-04-28.zip"],"total_before":3}
+{"type":"result","stage":"backup_config_show","retention_policy":{"daily":7,"weekly":4,"monthly":6},"output_dir":"/path/to/backups","source":"defaults"}
+{"type":"result","stage":"backup_config_set","retention_policy":{"daily":14,"weekly":4,"monthly":6},"output_dir":"/path/to/backups","source":"file"}
+```
+
+**Backup error codes:** `BACKUP_ERROR` (general backup operation failure), `BACKUP_NOT_FOUND` (no data to back up — data directory is empty or missing). See Section 6 for full error handling guidance.
+
 ### Agent Discovery Commands
 
 | Command | Description |
@@ -263,6 +299,37 @@ web-clip-helper refresh --re-enrich
 # Delete a clip
 web-clip-helper delete 42
 ```
+
+### Step 4.5: Backup and Restore Data
+
+Use backup commands to protect clip data. Backups are zip archives containing `config.yaml`, `clips.db`, and the `clips/` directory.
+
+```bash
+# Create a backup (uses default output directory)
+web-clip-helper backup create
+
+# Create a backup to a specific directory
+web-clip-helper backup create --output-dir /path/to/backups
+
+# List existing backups
+web-clip-helper backup list
+
+# Clean up old backups per retention policy
+web-clip-helper backup cleanup
+
+# View current backup configuration
+web-clip-helper backup config show
+
+# Change retention policy (e.g. keep 14 daily backups)
+web-clip-helper backup config set retention_policy.daily 14
+
+# Change backup output directory
+web-clip-helper backup config set output_dir /path/to/backups
+```
+
+**Retention policy:** Uses Grandfather-Father-Son rotation — `daily` (default 7), `weekly` (default 4), `monthly` (default 6). `cleanup` removes backups exceeding the policy limits.
+
+**To restore:** Unzip a backup file to the original data/config directories. Verify with `agent doctor` after restoring.
 
 ### Step 5: Troubleshoot Issues
 
