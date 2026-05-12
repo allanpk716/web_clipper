@@ -154,6 +154,96 @@ class TestRedactionConstraints:
         )
 
 
+# ── Backup command documentation audit ────────────────────────────
+
+class TestBackupDocStages:
+    """Both docs must reference correct backup stage names from JSONL output."""
+
+    BACKUP_STAGES = [
+        "backup_create",
+        "backup_list",
+        "backup_cleanup",
+        "backup_config_show",
+        "backup_config_set",
+    ]
+
+    @pytest.fixture(params=["README.md", "AGENT_INSTRUCTION.md"])
+    def doc(self, request):
+        return _read_doc(request.param)
+
+    @pytest.mark.parametrize("stage", BACKUP_STAGES)
+    def test_stage_referenced(self, doc, stage):
+        assert stage in doc, (
+            f"Backup stage '{stage}' not found in documentation"
+        )
+
+
+class TestBackupDocErrorCodes:
+    """Both docs must reference backup error codes."""
+
+    @pytest.fixture(params=["README.md", "AGENT_INSTRUCTION.md"])
+    def doc(self, request):
+        return _read_doc(request.param)
+
+    def test_backup_error_referenced(self, doc):
+        assert "BACKUP_ERROR" in doc, (
+            "BACKUP_ERROR error code not found in documentation"
+        )
+
+    def test_backup_not_found_referenced(self, doc):
+        assert "BACKUP_NOT_FOUND" in doc, (
+            "BACKUP_NOT_FOUND error code not found in documentation"
+        )
+
+
+class TestBackupDocExitCodeTable:
+    """README.md exit code table must include backup error codes under exit 3."""
+
+    def test_readme_exit_table_includes_backup_error(self):
+        doc = _read_doc("README.md")
+        # Find the exit code table row for exit 3
+        m = re.search(r"\|\s*`3`\s*\|[^|]*`BACKUP_ERROR`", doc)
+        assert m, "BACKUP_ERROR not found in README exit code table (exit 3 row)"
+
+    def test_readme_exit_table_includes_backup_not_found(self):
+        doc = _read_doc("README.md")
+        m = re.search(r"\|\s*`3`\s*\|[^|]*`BACKUP_NOT_FOUND`", doc)
+        assert m, "BACKUP_NOT_FOUND not found in README exit code table (exit 3 row)"
+
+    def test_readme_error_detail_table_includes_backup_error(self):
+        doc = _read_doc("README.md")
+        # Error detail table should have a row for BACKUP_ERROR
+        m = re.search(r"\|\s*`BACKUP_ERROR`\s*\|[^|]+\|", doc)
+        assert m, "BACKUP_ERROR not found in README error detail table"
+
+    def test_readme_error_detail_table_includes_backup_not_found(self):
+        doc = _read_doc("README.md")
+        m = re.search(r"\|\s*`BACKUP_NOT_FOUND`\s*\|[^|]+\|", doc)
+        assert m, "BACKUP_NOT_FOUND not found in README error detail table"
+
+
+class TestBackupDocCommandList:
+    """Both docs must list all 5 backup commands."""
+
+    BACKUP_COMMANDS = [
+        "backup create",
+        "backup list",
+        "backup cleanup",
+        "backup config show",
+        "backup config set",
+    ]
+
+    @pytest.fixture(params=["README.md", "AGENT_INSTRUCTION.md"])
+    def doc(self, request):
+        return _read_doc(request.param)
+
+    @pytest.mark.parametrize("cmd", BACKUP_COMMANDS)
+    def test_command_mentioned(self, doc, cmd):
+        assert cmd in doc, (
+            f"Backup command '{cmd}' not mentioned in documentation"
+        )
+
+
 # ── No TBD/TODO in logging sections ────────────────────────────────
 
 class TestNoPlaceholders:
