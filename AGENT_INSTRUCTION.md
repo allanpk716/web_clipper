@@ -292,7 +292,7 @@ web-clip-helper report submit "Description of the issue" --type bug
 | 0 | Success |
 | 1 | Fatal/unknown (`INTERNAL_ERROR`, `FATAL_CRASH`) |
 | 2 | Input/config (`INPUT_INVALID`, `CONFIG_ERROR`, `INVALID_TYPE`, `NO_CUSTOM_PROMPT`) |
-| 3 | Resource/dependency (`NOT_FOUND`, `STORAGE_ERROR`, `INDEX_ERROR`, `REFRESH_ERROR`) |
+| 3 | Resource/dependency (`NOT_FOUND`, `STORAGE_ERROR`, `INDEX_ERROR`, `REFRESH_ERROR`, `BACKUP_ERROR`, `BACKUP_NOT_FOUND`) |
 | 4 | Network/third-party (`NETWORK_ERROR`, `FETCH_ERROR`, `ROUTING_ERROR`, `URL_ROUTE_ERROR`, `TIMEOUT_ERROR`, `IMPORT_ERROR`, `IMPORT_SCAN_ERROR`) |
 | 5 | Concurrency (`RESOURCE_LOCKED`) |
 
@@ -318,6 +318,8 @@ web-clip-helper report submit "Description of the issue" --type bug
 | `IMPORT_ERROR` | Failed to import clip data into the index | Check disk space, file permissions, and database integrity. |
 | `IMPORT_SCAN_ERROR` | Failed to scan source directory for clip folders | Check that the source directory exists and is readable. |
 | `RESOURCE_LOCKED` | Concurrent access conflict — resource locked by another process | Wait for the other process to finish or remove stale lock files. |
+| `BACKUP_ERROR` | Backup operation failed | Check disk space, file permissions, and that output directory is writable. |
+| `BACKUP_NOT_FOUND` | No data found to back up (data directory is empty or missing) | Verify the data directory exists and contains files to back up. |
 
 ### Error JSONL Format
 
@@ -333,6 +335,8 @@ web-clip-helper report submit "Description of the issue" --type bug
 | `NOT_FOUND` | **Skip** — not a real error, the resource simply doesn't exist |
 | `INPUT_INVALID`, `CONFIG_ERROR`, `ROUTING_ERROR`, `INVALID_TYPE`, `NO_CUSTOM_PROMPT` | **Fix input** — check arguments, config, or URL format |
 | `STORAGE_ERROR`, `INDEX_ERROR` | **Check system** — disk space, file permissions, DB locks |
+| `BACKUP_ERROR` | **Check system** — disk space, output dir permissions |
+| `BACKUP_NOT_FOUND` | **Check system** — verify data directory exists and contains files |
 | `IMPORT_ERROR`, `IMPORT_SCAN_ERROR` | **Fix input** (check source directory) or **Retry** |
 | `RESOURCE_LOCKED` | **Wait** — another process holds the lock; retry after a delay |
 | `INTERNAL_ERROR`, `FATAL_CRASH` | **Escalate** — check crash dumps, file a report |

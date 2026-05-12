@@ -34,6 +34,8 @@ EXIT_CODE_MAP: dict[str, int] = {
     "STORAGE_ERROR": 3,
     "INDEX_ERROR": 3,
     "REFRESH_ERROR": 3,
+    "BACKUP_ERROR": 3,
+    "BACKUP_NOT_FOUND": 3,
     # Exit 4 — network / third-party (import involves external data sources)
     "IMPORT_ERROR": 4,
     "IMPORT_SCAN_ERROR": 4,
@@ -112,6 +114,10 @@ class ErrorCode:
     # ── Concurrency / resource lock errors ────────────────────────
     RESOURCE_LOCKED = "RESOURCE_LOCKED"
 
+    # ── Backup errors ─────────────────────────────────────────────
+    BACKUP_ERROR = "BACKUP_ERROR"
+    BACKUP_NOT_FOUND = "BACKUP_NOT_FOUND"
+
     # ── Description mapping ───────────────────────────────────────
 
     _DESCRIPTIONS: dict[str, str] = {
@@ -130,6 +136,8 @@ class ErrorCode:
         "RESOURCE_LOCKED": "Concurrent access conflict — resource is locked by another process",
         "IMPORT_ERROR": "Failed to import clip data into the index",
         "IMPORT_SCAN_ERROR": "Failed to scan source directory for clip folders",
+        "BACKUP_ERROR": "Backup operation failed",
+        "BACKUP_NOT_FOUND": "No data found to back up (data directory is empty or missing)",
     }
 
     # ── Guidance mapping (troubleshooting hints) ──────────────────
@@ -150,6 +158,8 @@ class ErrorCode:
         "RESOURCE_LOCKED": "Another process holds a lock on the resource. Wait for it to finish or remove stale lock files.",
         "IMPORT_ERROR": "Check disk space, file permissions, and database integrity. Verify source data is valid.",
         "IMPORT_SCAN_ERROR": "Check that the source directory exists and is readable. Verify directory structure matches DATE_Title format.",
+        "BACKUP_ERROR": "Check disk space, file permissions, and that output directory is writable.",
+        "BACKUP_NOT_FOUND": "Verify the data directory exists and contains files to back up (clips.db, clips/, config.yaml).",
     }
 
     @classmethod
