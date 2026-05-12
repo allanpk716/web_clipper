@@ -27,11 +27,12 @@ def clean():
 
 def build():
     """Run PyInstaller to create standalone executable."""
-    # Ensure package is importable
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "-e", "."],
-        cwd=ROOT,
-    )
+    # Ensure package is importable (skip with --skip-install if deps pre-installed)
+    if "--skip-install" not in sys.argv:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "-e", "."],
+            cwd=ROOT,
+        )
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
