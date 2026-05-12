@@ -578,6 +578,94 @@ def _build_commands() -> list[dict[str, Any]]:
                 },
             ],
         },
+        # ── backup create ──────────────────────────────────────
+        {
+            "name": "backup create",
+            "description": "Create a backup zip archive of config and data directories",
+            "is_idempotent": False,  # creates a new zip each time
+            "parameters": [
+                {
+                    "name": "--output-dir",
+                    "type": "str",
+                    "required": False,
+                    "description": "Override default backup output directory",
+                },
+            ],
+        },
+        # ── backup list ────────────────────────────────────────
+        {
+            "name": "backup list",
+            "description": "List existing backup files",
+            "is_idempotent": True,
+            "parameters": [
+                {
+                    "name": "--output-dir",
+                    "type": "str",
+                    "required": False,
+                    "description": "Override default backup output directory",
+                },
+            ],
+        },
+        # ── backup cleanup ─────────────────────────────────────
+        {
+            "name": "backup cleanup",
+            "description": "Rotate backups according to retention policy",
+            "is_idempotent": True,
+            "parameters": [
+                {
+                    "name": "--output-dir",
+                    "type": "str",
+                    "required": False,
+                    "description": "Override default backup output directory",
+                },
+                {
+                    "name": "--config-path",
+                    "type": "str",
+                    "required": False,
+                    "description": "Override default backup config file path",
+                },
+            ],
+        },
+        # ── backup config show ─────────────────────────────────
+        {
+            "name": "backup config show",
+            "description": "Show effective backup configuration (retention policy, output directory, config source)",
+            "is_idempotent": True,
+            "parameters": [
+                {
+                    "name": "--config-path",
+                    "type": "str",
+                    "required": False,
+                    "description": "Override default backup config file path",
+                },
+            ],
+        },
+        # ── backup config set ──────────────────────────────────
+        {
+            "name": "backup config set",
+            "description": "Set a backup configuration value (retention_policy.daily/weekly/monthly or output_dir)",
+            "is_idempotent": True,
+            "parameters": [
+                {
+                    "name": "key",
+                    "type": "str",
+                    "required": True,
+                    "description": "Config key (retention_policy.daily/weekly/monthly or output_dir)",
+                },
+                {
+                    "name": "value",
+                    "type": "str",
+                    "required": True,
+                    "description": "Value to set",
+                },
+                {
+                    "name": "--config-path",
+                    "type": "str",
+                    "required": False,
+                    "description": "Override default backup config file path",
+                },
+            ],
+        },
     ]
 
 

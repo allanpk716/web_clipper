@@ -1352,3 +1352,121 @@ class TestT03SchemaRegistration:
         schema = get_commands_schema()
         agent_cmds = [c for c in schema if c["name"].startswith("agent ")]
         assert len(agent_cmds) == 15
+
+
+# ═══════════════════════════════════════════════════════════════════
+# S03 backup command schema entries
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestBackupSchemaEntries:
+    """Verify all 5 backup commands appear in agent schema with correct parameters."""
+
+    BACKUP_COMMANDS = [
+        "backup create",
+        "backup list",
+        "backup cleanup",
+        "backup config show",
+        "backup config set",
+    ]
+
+    def test_all_backup_commands_present(self) -> None:
+        from web_clip_helper.agent_schema import get_commands_schema
+
+        schema = get_commands_schema()
+        names = {c["name"] for c in schema}
+        for cmd_name in self.BACKUP_COMMANDS:
+            assert cmd_name in names, f"Missing schema entry: {cmd_name}"
+
+    def test_backup_create_not_idempotent(self) -> None:
+        from web_clip_helper.agent_schema import get_commands_schema
+
+        schema = get_commands_schema()
+        cmd = next(c for c in schema if c["name"] == "backup create")
+        assert cmd["is_idempotent"] is False
+        assert cmd["description"] != ""
+        param_names = {p["name"] for p in cmd["parameters"]}
+        assert "--output-dir" in param_names
+        assert len(cmd["parameters"]) == 1
+
+    def test_backup_list_is_idempotent(self) -> None:
+        from web_clip_helper.agent_schema import get_commands_schema
+
+        schema = get_commands_schema()
+        cmd = next(c for c in schema if c["name"] == "backup list")
+        assert cmd["is_idempotent"] is True
+        param_names = {p["name"] for p in cmd["parameters"]}
+        assert "--output-dir" in param_names
+        assert len(cmd["parameters"]) == 1
+
+    def test_backup_cleanup_is_idempotent(self) -> None:
+        from web_clip_helper.agent_schema import get_commands_schema
+
+        schema = get_commands_schema()
+        cmd = next(c for c in schema if c["name"] == "backup cleanup")
+        assert cmd["is_idempotent"] is True
+        param_names = {p["name"] for p in cmd["parameters"]}
+        assert "--output-dir" in param_names
+        assert "--config-path" in param_names
+        assert len(cmd["parameters"]) == 2
+
+    def test_backup_config_show_is_idempotent(self) -> None:
+        from web_clip_helper.agent_schema import get_commands_schema
+
+        schema = get_commands_schema()
+        cmd = next(c for c in schema if c["name"] == "backup config show")
+        assert cmd["is_idempotent"] is True
+        param_names = {p["name"] for p in cmd["parameters"]}
+        assert "--config-path" in param_names
+        assert len(cmd["parameters"]) == 1
+
+    def test_backup_config_set_is_idempotent(self) -> None:
+        from web_clip_helper.agent_schema import get_commands_schema
+
+        schema = get_commands_schema()
+        cmd = next(c for c in schema if c["name"] == "backup config set")
+        assert cmd["is_idempotent"] is True
+        param_names = {p["name"] for p in cmd["parameters"]}
+        assert "key" in param_names
+        assert "value" in param_names
+        assert "--config-path" in param_names
+        # key and value are required
+        for p in cmd["parameters"]:
+            if p["name"] in ("key", "value"):
+                assert p["required"] is True
+        assert len(cmd["parameters"]) == 3
+
+    def test_backup_config_set_key_required(self) -> None:
+        from web_clip_helper.agent_schema import get_commands_schema
+
+        schema = get_commands_schema()
+        cmd = next(c for c in schema if c["name"] == "backup config set")
+        key_param = next(p for p in cmd["parameters"] if p["name"] == "key")
+        assert key_param["required"] is True
+        assert key_param["type"] == "str"
+
+    def test_backup_config_set_value_required(self) -> None:
+        from web_clip_helper.agent_schema import get_commands_schema
+
+        schema = get_commands_schema()
+        cmd = next(c for c in schema if c["name"] == "backup config set")
+        value_param = next(p for p in cmd["parameters"] if p["name"] == "value")
+        assert value_param["required"] is True
+        assert value_param["type"] == "str"
+
+    def test_backup_commands_in_schema_cli_output(self) -> None:
+        """Verify backup commands appear in `agent schema` CLI output."""
+        result = runner.invoke(app, ["agent", "schema"])
+        lines = _parse_jsonl(result.output)
+        schema_line = lines[0]
+        names = {cmd["name"] for cmd in schema_line["data"]["commands"]}
+        for cmd_name in self.BACKUP_COMMANDS:
+            assert cmd_name in names, f"Missing in CLI schema output: {cmd_name}"
+
+    def test_total_schema_count_includes_backups(self) -> None:
+        """Verify total command count increased by 5 for backup commands."""
+        from web_clip_helper.agent_schema import get_commands_schema
+
+        schema = get_commands_schema()
+        backup_cmds = [c for c in schema if c["name"].startswith("backup ")]
+        assert len(backup_cmds) == 5
