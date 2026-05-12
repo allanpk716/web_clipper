@@ -241,6 +241,40 @@ def _build_commands() -> list[dict[str, Any]]:
                 },
             ],
         },
+        # ── import ───────────────────────────────────────────────────
+        {
+            "name": "import",
+            "description": "Import previously clipped data from an external directory into the index",
+            "is_idempotent": True,
+            "parameters": [
+                {
+                    "name": "source_dir",
+                    "type": "str",
+                    "required": True,
+                    "description": "Directory containing previously clipped data to import",
+                },
+                {
+                    "name": "--copy",
+                    "type": "bool",
+                    "required": False,
+                    "description": "Copy files into storage_path instead of referencing in-place",
+                    "default": False,
+                },
+                {
+                    "name": "--source-type",
+                    "type": "str",
+                    "required": False,
+                    "description": "Override source_type for entries without manifest data",
+                },
+                {
+                    "name": "--dry-run",
+                    "type": "bool",
+                    "required": False,
+                    "description": "Preview what would be imported without writing to index",
+                    "default": False,
+                },
+            ],
+        },
         # ── version ───────────────────────────────────────────────
         {
             "name": "version",

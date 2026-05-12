@@ -229,6 +229,7 @@ _COMMAND_HELP = [
     {"name": "search", "help": "Search clipped items by keyword"},
     {"name": "tags", "help": "List or manage tags"},
     {"name": "delete", "help": "Delete a clipped item by ID"},
+    {"name": "import", "help": "Import previously clipped data from an external directory"},
     {"name": "update", "help": "Update clip fields (title, tags, category, dynamic flag, refresh interval)"},
     {"name": "refresh", "help": "Refresh dynamic clipped items"},
     {"name": "report", "help": "Submit and view structured feedback reports"},

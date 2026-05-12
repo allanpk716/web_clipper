@@ -119,6 +119,44 @@ JSONL 结果：
 
 错误码：`NOT_FOUND`（ID 不存在）、`INDEX_ERROR`（数据库删除失败）、`INTERNAL_ERROR`（意外错误）
 
+### import — 批量导入已有数据
+
+```bash
+# 预览导入内容（不写入数据库）
+web-clip-helper import /path/to/clipped/data --dry-run
+
+# 原地导入（引用原文件，不复制）
+web-clip-helper import /path/to/clipped/data
+
+# 导入并复制文件到 storage_path
+web-clip-helper import /path/to/clipped/data --copy
+
+# 覆盖无 manifest 条目的 source_type
+web-clip-helper import /path/to/clipped/data --source-type wechat
+```
+
+将外部目录中已有的剪藏数据批量注册到索引。支持以下目录结构：
+
+- 递归扫描所有子目录（不限 `dynamic`/`static`）
+- 识别 `日期_标题/日期_标题.md` 文件夹格式
+- 读取 `_manifest.json` 获取 URL、source_type 等元数据
+- 无 manifest 时从 Markdown 内容自动提取 URL（支持 `**链接**: URL`、`来源: URL`、Markdown 链接等格式）
+- 相同 `folder_path` 自动去重
+
+JSONL 输出（dry-run）：
+
+```json
+{"type":"result","stage":"import","dry_run":true,"folder":"/path/2026-04-10_Article","markdown_exists":true,"manifest":true,"url":"https://...","source_type":"web"}
+```
+
+JSONL 输出（导入结果）：
+
+```json
+{"type":"result","stage":"import","imported":5,"skipped":1,"total_scanned":6}
+```
+
+错误码：`INPUT_INVALID`（目录不存在）、`IMPORT_SCAN_ERROR`（扫描失败）、`IMPORT_ERROR`（数据库写入失败）
+
 ### search — 关键词搜索
 
 ```bash

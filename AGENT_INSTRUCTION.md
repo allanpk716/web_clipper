@@ -107,6 +107,7 @@ Every JSONL line includes these envelope fields:
 | `tags` | List all unique tags with usage counts | Yes |
 | `update <id>` | Update clip fields (title, tags, category, dynamic, interval) | Yes |
 | `delete <id>` | Delete a clip by ID (DB record + folder) | Yes |
+| `import <dir>` | Import previously clipped data from an external directory | Yes |
 | `refresh` | Re-clip dynamic items that are due for refresh | Yes |
 | `version` | Print current version | Yes |
 
@@ -205,6 +206,44 @@ web-clip-helper search "machine learning" --full
 # Get a specific clip with full Markdown content
 web-clip-helper get 42 --content
 ```
+
+### Step 3.5: Import Existing Data
+
+Use `import` to bulk-register previously clipped data from an external directory into the index:
+
+```bash
+# Preview what would be imported (no writes)
+web-clip-helper import /path/to/clipped/data --dry-run
+
+# Import in-place (references original files, no copy)
+web-clip-helper import /path/to/clipped/data
+
+# Import and copy files into storage_path
+web-clip-helper import /path/to/clipped/data --copy
+
+# Override source_type for entries without manifest data
+web-clip-helper import /path/to/clipped/data --source-type wechat
+```
+
+**What it scans:**
+- Recursively scans all subdirectories for `DATE_Title/DATE_Title.md` folder structures
+- Reads `_manifest.json` files (supports both `{"items": [...]}` and `{"repos": [...]}` schemas) for URL, source_type, and metadata
+- When no manifest exists, extracts URLs from markdown content (patterns: `**链接**: URL`, `来源: URL`, `Source: URL`, Markdown `[text](url)`, bare URL lines)
+
+**Deduplication:** Entries with the same `folder_path` are skipped automatically. Second import of the same directory produces `imported: 0, skipped: N`.
+
+**Output (dry-run):**
+```jsonl
+{"type":"result","stage":"import","dry_run":true,"folder":"/path/2026-04-10_Article","markdown_exists":true,"manifest":true,"url":"https://...","source_type":"web",...}
+```
+
+**Output (import):**
+```jsonl
+{"type":"progress","stage":"import","message":"Imported","record_id":42,...}
+{"type":"result","stage":"import","imported":5,"skipped":1,"total_scanned":6,...}
+```
+
+**Error codes:** `INPUT_INVALID` (source dir not found), `IMPORT_SCAN_ERROR` (scan failure), `IMPORT_ERROR` (DB write failure).
 
 ### Step 4: Maintain Clips
 
