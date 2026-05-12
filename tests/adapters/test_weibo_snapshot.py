@@ -632,3 +632,190 @@ class TestMetadataHeader:
             result = WeiboSnapshotAdapter().fetch(_SNAPSHOT_URL)
 
         assert "0 reposts, 0 comments, 0 likes" in result.content_md
+
+
+# ── Registry integration ────────────────────────────────────────────
+
+
+class TestRegistryIntegration:
+    """Verify that WeiboSnapshotAdapter is wired correctly through the real registry."""
+
+    @staticmethod
+    def _reload_adapter_modules():
+        """Reload adapter modules so @register_adapter decorators re-fire after router clear."""
+        import importlib
+
+        import web_clip_helper.adapters.weibo_snapshot
+        import web_clip_helper.adapters.weibo
+        import web_clip_helper.adapters.generic
+
+        importlib.reload(web_clip_helper.adapters.weibo_snapshot)
+        importlib.reload(web_clip_helper.adapters.weibo)
+        importlib.reload(web_clip_helper.adapters.generic)
+
+    def test_registry_routes_snapshot_url_to_weibo_snapshot_adapter(self):
+        """Importing _registry should make snapshot URLs route to WeiboSnapshotAdapter."""
+        import importlib
+
+        import web_clip_helper.adapters._registry as _reg
+
+        importlib.reload(_reg)
+        self._reload_adapter_modules()
+        cls = route_url(_SNAPSHOT_URL)
+        assert cls.__name__ == "WeiboSnapshotAdapter"
+        assert cls.__module__ == "web_clip_helper.adapters.weibo_snapshot"
+
+    def test_registry_weibo_url_not_routed_to_snapshot_adapter(self):
+        """Standard weibo.cn URLs should NOT route to WeiboSnapshotAdapter."""
+        import importlib
+
+        import web_clip_helper.adapters._registry as _reg
+
+        importlib.reload(_reg)
+        self._reload_adapter_modules()
+        cls = route_url("https://weibo.cn/status/5123456789012345")
+        assert cls.__name__ != "WeiboSnapshotAdapter"
+
+
+class TestAdapterPriority:
+    """Confirm snapshot URLs route to WeiboSnapshotAdapter, not WeiboAdapter or GenericWebAdapter."""
+
+    @staticmethod
+    def _reload_adapter_modules():
+        import importlib
+
+        import web_clip_helper.adapters.weibo_snapshot
+        import web_clip_helper.adapters.weibo
+        import web_clip_helper.adapters.generic
+
+        importlib.reload(web_clip_helper.adapters.weibo_snapshot)
+        importlib.reload(web_clip_helper.adapters.weibo)
+        importlib.reload(web_clip_helper.adapters.generic)
+
+    def test_snapshot_url_not_weibo_adapter(self):
+        """Snapshot URL should not be handled by WeiboAdapter."""
+        import importlib
+
+        import web_clip_helper.adapters._registry as _reg
+
+        importlib.reload(_reg)
+        self._reload_adapter_modules()
+        from web_clip_helper.adapters.weibo import WeiboAdapter
+
+        cls = route_url(_SNAPSHOT_URL)
+        assert cls.__name__ != "WeiboAdapter"
+
+    def test_snapshot_url_not_generic_adapter(self):
+        """Snapshot URL should not fall through to GenericWebAdapter."""
+        import importlib
+
+        import web_clip_helper.adapters._registry as _reg
+
+        importlib.reload(_reg)
+        self._reload_adapter_modules()
+        cls = route_url(_SNAPSHOT_URL)
+        # If it's the fallback _GenericAdapter, that also means it didn't match
+        # WeiboSnapshotAdapter's pattern — but it should match.
+        assert cls.__name__ not in ("GenericWebAdapter", "_GenericAdapter")
+
+    def test_snapshot_url_is_weibo_snapshot_adapter(self):
+        """Snapshot URL must route to WeiboSnapshotAdapter when all adapters loaded."""
+        import importlib
+
+        import web_clip_helper.adapters._registry as _reg
+
+        importlib.reload(_reg)
+        self._reload_adapter_modules()
+        cls = route_url(_SNAPSHOT_URL)
+        assert cls.__name__ == "WeiboSnapshotAdapter"
+        assert cls.__module__ == "web_clip_helper.adapters.weibo_snapshot"
+
+
+# ── Edge cases ──────────────────────────────────────────────────────
+
+
+class TestEdgeCaseRedirects:
+    """Non-302 redirect codes (303, 307, 308) should be rejected."""
+
+    @pytest.mark.parametrize("code", [303, 307, 308])
+    def test_non_302_redirect_code_fails(self, code):
+        """Redirect codes other than 302 should raise AdapterError."""
+        with patch("web_clip_helper.adapters.weibo_snapshot.httpx.Client") as mock_cls:
+            _setup_single_client(mock_cls, _mock_response(status_code=code))
+            with pytest.raises(AdapterError, match="未返回预期的 redirect"):
+                WeiboSnapshotAdapter().fetch(_SNAPSHOT_URL)
+
+
+class TestEdgeCaseMidExtraction:
+    """Edge cases in mid extraction from Location header."""
+
+    def test_very_long_mid_19_digits(self):
+        """Very long mid (19+ digits) should be extracted and used correctly."""
+        long_mid = "5123456789012345678"  # 19 digits
+        redirect_resp = _mock_response(
+            status_code=302,
+            headers={"Location": f"https://m.weibo.cn/status/{long_mid}"},
+        )
+        api_resp = _mock_response(200, json_data=_sample_api_response(status_title="", author=""))
+
+        with patch("web_clip_helper.adapters.weibo_snapshot.httpx.Client") as mock_cls:
+            c0, c1 = _setup_two_clients(mock_cls, redirect_resp, api_resp)
+            result = WeiboSnapshotAdapter().fetch(_SNAPSHOT_URL)
+
+        assert isinstance(result, RawContent)
+        assert result.title == f"Weibo post {long_mid}"
+        # Verify the API was called with the correct mid
+        c1.get.assert_called_once()
+        call_url = c1.get.call_args[0][0]
+        assert long_mid in call_url
+
+    def test_location_with_fragment(self):
+        """Location header with URL fragment (#comment) should still extract mid."""
+        redirect_resp = _mock_response(
+            status_code=302,
+            headers={"Location": "https://m.weibo.cn/status/5123456789012345#comment"},
+        )
+        api_resp = _mock_response(200, json_data=_sample_api_response())
+
+        with patch("web_clip_helper.adapters.weibo_snapshot.httpx.Client") as mock_cls:
+            _setup_two_clients(mock_cls, redirect_resp, api_resp)
+            result = WeiboSnapshotAdapter().fetch(_SNAPSHOT_URL)
+
+        assert isinstance(result, RawContent)
+        assert result.source_type == "weibo_snapshot"
+
+
+class TestEdgeCaseApiResponse:
+    """Edge cases in API response handling."""
+
+    def test_api_json_decode_error(self):
+        """Non-JSON body from API should raise an unhandled exception (adapter doesn't catch ValueError).
+
+        NOTE: The adapter only catches httpx.TimeoutException, HTTPStatusError, and
+        RequestError. A JSON decode error (ValueError subclass) propagates uncaught.
+        This test documents the actual behavior — a future fix should wrap it in AdapterError.
+        """
+        redirect_resp = _mock_response(
+            status_code=302,
+            headers={"Location": "https://m.weibo.cn/status/5123456789012345"},
+        )
+        api_resp = _mock_response(200, text="<html>Error</html>")
+        api_resp.json.side_effect = ValueError("JSON decode error")
+
+        with patch("web_clip_helper.adapters.weibo_snapshot.httpx.Client") as mock_cls:
+            _setup_two_clients(mock_cls, redirect_resp, api_resp)
+            with pytest.raises(ValueError, match="JSON decode error"):
+                WeiboSnapshotAdapter().fetch(_SNAPSHOT_URL)
+
+    def test_api_ok_1_data_null(self):
+        """API returns ok=1 but data is null → AdapterError (empty data)."""
+        redirect_resp = _mock_response(
+            status_code=302,
+            headers={"Location": "https://m.weibo.cn/status/5123456789012345"},
+        )
+        api_resp = _mock_response(200, json_data={"ok": 1, "data": None})
+
+        with patch("web_clip_helper.adapters.weibo_snapshot.httpx.Client") as mock_cls:
+            _setup_two_clients(mock_cls, redirect_resp, api_resp)
+            with pytest.raises(AdapterError, match="empty data"):
+                WeiboSnapshotAdapter().fetch(_SNAPSHOT_URL)
