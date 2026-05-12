@@ -25,7 +25,7 @@ from web_clip_helper.paths import get_reports_dir
 # Trigger adapter auto-discovery registration
 import web_clip_helper.adapters._registry  # noqa: F401
 
-__all__ = ["app", "config_app", "report_app"]
+__all__ = ["app", "backup_app", "config_app", "report_app"]
 
 
 class _JSONLGroup(TyperGroup):
@@ -234,6 +234,7 @@ _COMMAND_HELP = [
     {"name": "refresh", "help": "Refresh dynamic clipped items"},
     {"name": "report", "help": "Submit and view structured feedback reports"},
     {"name": "config", "help": "Manage configuration (list/get/set + prompt test)"},
+    {"name": "backup", "help": "Backup management (create/list/cleanup/config)"},
     {"name": "version", "help": "Print the current version"},
     {"name": "agent", "help": "Agent reserved namespace — discovery, health, and introspection (info/schema/errors/doctor/update)"},
 ]
@@ -643,6 +644,139 @@ def report_show(
 
 # Register report sub-app on main app
 app.add_typer(report_app, name="report", help="Submit and view structured feedback reports")
+
+
+# ── Backup sub-application ────────────────────────────────────────
+backup_app = typer.Typer(
+    name="backup",
+    add_completion=False,
+    invoke_without_command=True,
+    no_args_is_help=True,
+    help="Backup management",
+)
+
+
+@backup_app.command(name="create")
+def backup_create(
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Override default backup output directory"),
+) -> None:
+    """Create a backup zip archive of config and data directories."""
+    from pathlib import Path
+
+    from web_clip_helper.services import backup_service
+
+    try:
+        result = backup_service.create_backup(output_dir=Path(output_dir) if output_dir else None)
+        jsonl_emit_result(
+            stage="backup_create",
+            path=result["path"],
+            size_bytes=result["size_bytes"],
+            output_dir=result["output_dir"],
+            filename=result["filename"],
+        )
+    except OSError as exc:
+        jsonl_emit_error(stage="backup_create", detail=str(exc), error_code="BACKUP_ERROR")
+        raise typer.Exit(exit_code_for("BACKUP_ERROR"))
+
+
+@backup_app.command(name="list")
+def backup_list(
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Override default backup output directory"),
+) -> None:
+    """List existing backup files."""
+    from web_clip_helper.services import backup_service
+
+    try:
+        backups = backup_service.list_backups(output_dir=output_dir)
+        for entry in backups:
+            jsonl_emit_result(stage="backup_list", **entry)
+        jsonl_emit_result(stage="backup_list", count=len(backups))
+    except Exception as exc:
+        jsonl_emit_error(stage="backup_list", detail=str(exc), error_code="BACKUP_ERROR")
+        raise typer.Exit(exit_code_for("BACKUP_ERROR"))
+
+
+@backup_app.command(name="cleanup")
+def backup_cleanup(
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Override default backup output directory"),
+    config_path: Optional[str] = typer.Option(None, "--config-path", help="Override default backup config file path"),
+) -> None:
+    """Rotate backups according to retention policy."""
+    from web_clip_helper.services import backup_service
+
+    try:
+        result = backup_service.cleanup_backups(output_dir=output_dir, config_path=config_path)
+        jsonl_emit_result(
+            stage="backup_cleanup",
+            kept=result["kept"],
+            removed=result["removed"],
+            total_before=result["total_before"],
+        )
+    except OSError as exc:
+        jsonl_emit_error(stage="backup_cleanup", detail=str(exc), error_code="BACKUP_ERROR")
+        raise typer.Exit(exit_code_for("BACKUP_ERROR"))
+
+
+# ── backup config sub-application ─────────────────────────────────
+backup_config_app = typer.Typer(
+    name="config",
+    add_completion=False,
+    invoke_without_command=True,
+    no_args_is_help=True,
+    help="Backup configuration",
+)
+
+
+@backup_config_app.command(name="show")
+def backup_config_show(
+    config_path: Optional[str] = typer.Option(None, "--config-path", help="Override default backup config file path"),
+) -> None:
+    """Show effective backup configuration."""
+    from web_clip_helper.services import backup_service
+
+    try:
+        result = backup_service.show_backup_config(config_path=config_path)
+        jsonl_emit_result(
+            stage="backup_config_show",
+            retention_policy=result["retention_policy"],
+            output_dir=result["output_dir"],
+            source=result["source"],
+        )
+    except Exception as exc:
+        jsonl_emit_error(stage="backup_config_show", detail=str(exc), error_code="BACKUP_ERROR")
+        raise typer.Exit(exit_code_for("BACKUP_ERROR"))
+
+
+@backup_config_app.command(name="set")
+def backup_config_set(
+    key: str = typer.Argument(..., help="Config key (retention_policy.daily/weekly/monthly or output_dir)"),
+    value: str = typer.Argument(..., help="Value to set"),
+    config_path: Optional[str] = typer.Option(None, "--config-path", help="Override default backup config file path"),
+) -> None:
+    """Set a backup configuration value."""
+    from web_clip_helper.services import backup_service
+
+    try:
+        result = backup_service.set_backup_config(key, value, config_path=config_path)
+        jsonl_emit_result(
+            stage="backup_config_set",
+            retention_policy=result["retention_policy"],
+            output_dir=result["output_dir"],
+            source=result["source"],
+        )
+    except ValueError as exc:
+        jsonl_emit_error(stage="backup_config_set", detail=str(exc), error_code="INPUT_INVALID")
+        raise typer.Exit(exit_code_for("INPUT_INVALID"))
+    except Exception as exc:
+        jsonl_emit_error(stage="backup_config_set", detail=str(exc), error_code="BACKUP_ERROR")
+        raise typer.Exit(exit_code_for("BACKUP_ERROR"))
+
+
+# Register backup config sub-app on backup_app
+backup_app.add_typer(backup_config_app, name="config", help="Backup configuration")
+
+# Register backup sub-app on main app
+app.add_typer(backup_app, name="backup", help="Backup management")
 
 
 @app.command()
