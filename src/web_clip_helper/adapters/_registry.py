@@ -16,6 +16,7 @@ from .github import GitHubAdapter
 from .generic import GenericWebAdapter
 from .weibo_headline import WeiboHeadlineAdapter
 from .weibo_card import WeiboCardAdapter
+from .weibo_snapshot import WeiboSnapshotAdapter
 from .weibo import WeiboAdapter
 from .wechat import WeChatAdapter
 from .arxiv import ArxivAdapter
@@ -25,6 +26,7 @@ __all__ = [
     "GenericWebAdapter",
     "WeiboHeadlineAdapter",
     "WeiboCardAdapter",
+    "WeiboSnapshotAdapter",
     "WeiboAdapter",
     "WeChatAdapter",
     "ArxivAdapter",
