@@ -49,10 +49,9 @@ def build():
         "--hidden-import", "web_clip_helper.cli",
         "--hidden-import", "web_clip_helper.adapters",
         "--hidden-import", "web_clip_helper.adapters._registry",
-        "--hidden-import", "web_clip_helper.adapters.base",
         "--hidden-import", "web_clip_helper.adapters.generic",
         "--hidden-import", "web_clip_helper.adapters.weibo",
-        "--hidden-import", "web_clip_helper.adapters.weibo_article",
+        "--hidden-import", "web_clip_helper.adapters.weibo_headline",
         "--hidden-import", "web_clip_helper.adapters.weibo_card",
         "--hidden-import", "web_clip_helper.adapters.wechat",
         "--hidden-import", "web_clip_helper.adapters.github",
@@ -73,14 +72,13 @@ def build():
         "--hidden-import", "web_clip_helper.url_utils",
         "--hidden-import", "web_clip_helper.agent_schema",
         "--hidden-import", "web_clip_helper.adapter",
-        "--hidden-import", "web_clip_helper.repository",
         "--hidden-import", "web_clip_helper.services",
         "--hidden-import", "web_clip_helper.services.import_service",
         "--hidden-import", "typer",
         "--hidden-import", "click",
         "--hidden-import", "httpx",
         "--hidden-import", "openai",
-        "--hidden-import", "pyyaml",
+        "--hidden-import", "yaml",
         "--hidden-import", "platformdirs",
         "--hidden-import", "agentsdk",
         # CLI entry point
@@ -94,9 +92,9 @@ def build():
     exe_path = DIST / exe_name
     if exe_path.exists():
         size_mb = exe_path.stat().st_size / (1024 * 1024)
-        print(f"\n✅ Built: {exe_path} ({size_mb:.1f} MB)")
+        print(f"\nOK Built: {exe_path} ({size_mb:.1f} MB)")
     else:
-        print(f"\n❌ Build failed: {exe_path} not found")
+        print(f"\nFAIL Build failed: {exe_path} not found")
         sys.exit(1)
 
 

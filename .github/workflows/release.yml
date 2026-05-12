@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-native:
     name: Build ${{ matrix.platform }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -21,10 +21,6 @@ jobs:
             arch: x64
             runner: ubuntu-latest
             python-arch: x64
-          - platform: linux
-            arch: x86
-            runner: ubuntu-latest
-            python-arch: x86
           - platform: windows
             arch: x64
             runner: windows-latest
@@ -99,9 +95,76 @@ jobs:
           path: ${{ steps.binary.outputs.asset_name }}
           if-no-files-found: error
 
+  build-linux-x86:
+    name: Build linux-x86 (Docker)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build in i386 container
+        run: |
+          docker run --rm \
+            --platform linux/386 \
+            -v "$(pwd)":/src \
+            -w /src \
+            i386/python:3.11-slim \
+            bash -c '
+              set -e
+              echo "--- Installing system deps ---"
+              apt-get update -qq && apt-get install -y -qq binutils > /dev/null 2>&1
+
+              echo "--- Installing agentsdk from GitHub ---"
+              pip install --quiet "agentsdk @ git+https://github.com/allanpk716/ai-agent-cli-rules.git@main#subdirectory=sdks/python"
+
+              echo "--- Installing PyInstaller ---"
+              pip install --quiet pyinstaller
+
+              echo "--- Installing project (no deps) ---"
+              pip install --no-deps -e .
+
+              echo "--- Installing runtime dependencies ---"
+              pip install --quiet \
+                "typer>=0.9.0" \
+                "httpx>=0.25.0" \
+                "readability-lxml>=0.8.1" \
+                "markdownify>=0.11.0" \
+                "pyyaml>=6.0" \
+                "openai>=1.0.0" \
+                "platformdirs>=3.0"
+
+              echo "--- Running PyInstaller ---"
+              python build.py --skip-install
+
+              echo "--- Build complete ---"
+              ls -lh dist/web-clip-helper
+              chmod +x dist/web-clip-helper
+            '
+
+      - name: Prepare release binary
+        id: binary
+        shell: bash
+        run: |
+          ASSET_NAME="web-clip-helper-linux-x86"
+          mv dist/web-clip-helper "${ASSET_NAME}"
+          chmod +x "${ASSET_NAME}"
+          echo "asset_name=${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+          ls -lh "${ASSET_NAME}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.binary.outputs.asset_name }}
+          path: ${{ steps.binary.outputs.asset_name }}
+          if-no-files-found: error
+
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [build-native, build-linux-x86]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
