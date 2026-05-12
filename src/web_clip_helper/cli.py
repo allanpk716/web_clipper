@@ -871,8 +871,8 @@ def import_clips(
 
     from web_clip_helper.error_codes import ErrorCode
     from web_clip_helper.services.import_service import (
-        ImportCandidate,
-        execute_import,
+        preview_import,
+        run_import,
         scan_import_dir,
     )
 
@@ -881,7 +881,6 @@ def import_clips(
         jsonl_emit_error(stage="import", detail=f"Source directory does not exist: {source_dir}", error_code=ErrorCode.INPUT_INVALID)
         raise typer.Exit(exit_code_for(ErrorCode.INPUT_INVALID))
 
-    # Scan
     try:
         candidates = scan_import_dir(src)
     except Exception as exc:
@@ -889,53 +888,23 @@ def import_clips(
         raise typer.Exit(exit_code_for(ErrorCode.IMPORT_SCAN_ERROR))
 
     if not candidates:
-        jsonl_emit_result(stage="import", imported=0, skipped=0, total_scanned=0, message="No clip folders found in source directory")
+        jsonl_emit_result(stage="import", imported=0, skipped=0, total_scanned=0, message="No clip folders found")
         return
 
-    jsonl_emit_progress(
-        stage="import", message="Scanning completed",
-        total_folders=len(candidates),
-        with_manifest=sum(1 for c in candidates if c.manifest_entry),
-    )
-
-    # Dry-run: preview only
     if dry_run:
-        for c in candidates:
-            jsonl_emit_result(
-                stage="import", dry_run=True,
-                folder=str(c.folder), markdown_exists=c.markdown_path.exists(),
-                manifest=bool(c.manifest_entry),
-                url=c.url_from_manifest, source_type=c.source_type_from_manifest or "unknown",
-            )
+        for row in preview_import(candidates):
+            jsonl_emit_result(stage="import", dry_run=True, **row)
         return
 
-    # Execute import
-    idx = _get_index()
+    jsonl_emit_progress(stage="import", message="Scanning completed", total_folders=len(candidates))
     try:
-        storage = None
-        copy_to_path = None
-        if copy_files:
-            from web_clip_helper.config import get_config as _get_cfg
-            from web_clip_helper.storage import StorageManager
-            copy_to_path = _get_cfg().storage_path
-            storage = StorageManager(copy_to_path)
-        result = execute_import(
-            idx, candidates,
-            copy_to=copy_to_path,
-            source_type_override=source_type or "",
-            storage=storage,
-        )
-        for rid in result.imported_ids:
-            jsonl_emit_progress(stage="import", message="Imported", record_id=rid)
-        jsonl_emit_result(
-            stage="import", imported=result.imported, skipped=result.skipped,
-            errors=result.errors, total_scanned=result.total_scanned,
-        )
+        _, result = run_import(src, copy_files=copy_files, source_type_override=source_type or "")
     except Exception as exc:
         jsonl_emit_error(stage="import", detail=f"Import failed: {exc}", error_code=ErrorCode.IMPORT_ERROR)
         raise typer.Exit(exit_code_for(ErrorCode.IMPORT_ERROR))
-    finally:
-        idx.close()
+    for rid in result.imported_ids:
+        jsonl_emit_progress(stage="import", message="Imported", record_id=rid)
+    jsonl_emit_result(stage="import", imported=result.imported, skipped=result.skipped, errors=result.errors, total_scanned=result.total_scanned)
 
 @app.command(name="tags")
 def list_tags() -> None:

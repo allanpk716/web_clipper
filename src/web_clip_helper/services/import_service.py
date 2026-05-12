@@ -27,6 +27,8 @@ __all__ = [
     "extract_url_from_markdown",
     "build_clip_record",
     "execute_import",
+    "preview_import",
+    "run_import",
 ]
 
 logger = logging.getLogger(__name__)
@@ -411,3 +413,68 @@ def _copy_files(
     record["folder_path"] = str(dest_entry)
     record["markdown_path"] = str(dest_entry / actual_md_name)
     return record
+
+
+# ── Preview ──────────────────────────────────────────────────────────
+
+
+def preview_import(candidates: list[ImportCandidate]) -> list[dict[str, Any]]:
+    """Build preview dicts for dry-run mode.
+
+    Returns a list of dicts suitable for JSONL emission, one per candidate.
+    """
+    return [
+        {
+            "folder": str(c.folder),
+            "markdown_exists": c.markdown_path.exists(),
+            "manifest": bool(c.manifest_entry),
+            "url": c.url_from_manifest,
+            "source_type": c.source_type_from_manifest or "unknown",
+        }
+        for c in candidates
+    ]
+
+
+# ── High-level import orchestrator ───────────────────────────────────
+
+
+def run_import(
+    source_dir: Path,
+    *,
+    copy_files: bool = False,
+    source_type_override: str = "",
+) -> tuple[list[dict[str, Any]], ImportResult]:
+    """Scan *source_dir* and import all candidates.
+
+    Returns (preview_rows, result).  If *copy_files* is True, a
+    :class:`StorageManager` is created from the project config.
+
+    This is the single entry-point for the CLI layer — it handles
+    scanning, storage setup, and execution in one call.
+    """
+    from web_clip_helper.config import get_config
+
+    candidates = scan_import_dir(source_dir)
+    previews = preview_import(candidates)
+
+    idx = ClipIndex(get_config().db_path)
+    try:
+        storage = None
+        copy_to: str | None = None
+        if copy_files:
+            from web_clip_helper.storage import StorageManager
+
+            copy_to = get_config().storage_path
+            storage = StorageManager(copy_to)
+
+        result = execute_import(
+            idx,
+            candidates,
+            copy_to=copy_to,
+            source_type_override=source_type_override,
+            storage=storage,
+        )
+    finally:
+        idx.close()
+
+    return previews, result
